@@ -182,6 +182,90 @@ const INITIAL_DATA = {
       confirmedHours: null,
       createdAt: '2026-09-22'
     }
+  ],
+
+  // Метки на карте: обычные волонтёрские и поисково-спасательные
+  mapMarkers: [
+    {
+      id: 'mark-1',
+      lat: 47.2357,
+      lng: 39.7128,
+      type: 'SEARCH_RESCUE', // Поисково-спасательная
+      title: 'Поиск: Михайлов А.Р., 72 года',
+      description: 'Пожилой мужчина ушёл из дома утром 22.09, одет в серую куртку и синие брюки. Район поиска — Левобережная зона, ориентир: остановка «Стройгородок».',
+      status: 'ACTIVE', // ACTIVE | FOUND | CLOSED
+      urgency: 'HIGH', // HIGH | MEDIUM | LOW
+      contactPhone: '+7 (863) 267-00-02',
+      createdBy: 'vol-3',
+      createdByName: 'Сидоров Денис Олегович',
+      createdAt: '2026-09-22T08:30:00',
+      lastSeenDate: '2026-09-22',
+      lastSeenLocation: 'ул. Нансена, 52, Ростов-на-Дону'
+    },
+    {
+      id: 'mark-2',
+      lat: 47.2226,
+      lng: 39.7189,
+      type: 'SEARCH_RESCUE',
+      title: 'Поиск: Козлова Е.С., 15 лет',
+      description: 'Школьница не вернулась домой после занятий. Последний раз видели возле ТЦ «Горизонт». Рост 163 см, длинные тёмные волосы, школьная форма.',
+      status: 'FOUND', // Найдена
+      urgency: 'HIGH',
+      contactPhone: '+7 (863) 267-00-02',
+      createdBy: 'vol-1',
+      createdByName: 'Иванов Алексей Дмитриевич',
+      createdAt: '2026-09-20T16:00:00',
+      lastSeenDate: '2026-09-20',
+      lastSeenLocation: 'ТЦ «Горизонт», пр. Стачки, 186'
+    },
+    {
+      id: 'mark-3',
+      lat: 47.2383,
+      lng: 39.7131,
+      type: 'REGULAR', // Обычное волонтёрство
+      title: 'Помощь пожилым: разнос продуктов',
+      description: 'Нужны 3 волонтёра для развоза продуктовых наборов по адресам одиноких пенсионеров в Ворошиловском районе. Пакеты собраны, нужен транспорт или самовывоз.',
+      status: 'ACTIVE',
+      urgency: 'MEDIUM',
+      contactPhone: '+7 (918) 550-33-21',
+      createdBy: 'vol-2',
+      createdByName: 'Петрова Мария Викторовна',
+      createdAt: '2026-09-23T10:00:00',
+      lastSeenDate: null,
+      lastSeenLocation: null
+    },
+    {
+      id: 'mark-4',
+      lat: 47.2288,
+      lng: 39.7450,
+      type: 'REGULAR',
+      title: 'Уборка территории приюта для животных',
+      description: 'Субботник в приюте «Добрые руки». Требуется 5–10 человек для уборки вольеров, выгула собак, починки ограждений. Инвентарь предоставляется.',
+      status: 'ACTIVE',
+      urgency: 'LOW',
+      contactPhone: '+7 (928) 195-77-00',
+      createdBy: 'vol-1',
+      createdByName: 'Иванов Алексей Дмитриевич',
+      createdAt: '2026-09-24T09:00:00',
+      lastSeenDate: null,
+      lastSeenLocation: null
+    },
+    {
+      id: 'mark-5',
+      lat: 47.2157,
+      lng: 39.7050,
+      type: 'SEARCH_RESCUE',
+      title: 'Поиск: Белов В.Н., 83 года',
+      description: 'Дедушка с деменцией пропал с территории частного дома на Левенцовке. Приметы: невысокий, седые волосы, ходит с тростью, одет в коричневый пиджак.',
+      status: 'ACTIVE',
+      urgency: 'HIGH',
+      contactPhone: '+7 (863) 267-00-02',
+      createdBy: 'vol-3',
+      createdByName: 'Сидоров Денис Олегович',
+      createdAt: '2026-09-24T07:15:00',
+      lastSeenDate: '2026-09-24',
+      lastSeenLocation: 'мкр. Левенцовский, ул. Ленточная, 8'
+    }
   ]
 };
 
@@ -194,7 +278,13 @@ class DataStore {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        // Обратная совместимость: если mapMarkers ещё нет в сохранённых данных
+        if (!parsed.mapMarkers) {
+          parsed.mapMarkers = JSON.parse(JSON.stringify(INITIAL_DATA.mapMarkers));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+        return parsed;
       }
     } catch (e) {
       console.error('Ошибка загрузки из localStorage', e);
@@ -415,6 +505,46 @@ class DataStore {
       items: validItems,
       totalHours
     };
+  }
+
+  // ============================================
+  // Карта и метки (Map Markers)
+  // ============================================
+  getMapMarkers(filterType = 'ALL') {
+    const markers = this.data.mapMarkers || [];
+    if (filterType === 'ALL') return markers;
+    return markers.filter(m => m.type === filterType);
+  }
+
+  addMapMarker(markerData) {
+    if (!this.data.mapMarkers) this.data.mapMarkers = [];
+    const currentVol = this.getActiveVolunteer();
+    const newMarker = {
+      id: 'mark-' + Date.now(),
+      status: 'ACTIVE',
+      createdBy: currentVol ? currentVol.id : 'unknown',
+      createdByName: currentVol ? currentVol.fullName : 'Неизвестный',
+      createdAt: new Date().toISOString(),
+      ...markerData
+    };
+    this.data.mapMarkers.unshift(newMarker);
+    this.save();
+    return newMarker;
+  }
+
+  updateMarkerStatus(markerId, newStatus) {
+    const marker = (this.data.mapMarkers || []).find(m => m.id === markerId);
+    if (marker) {
+      marker.status = newStatus;
+      this.save();
+      return marker;
+    }
+    return null;
+  }
+
+  deleteMarker(markerId) {
+    this.data.mapMarkers = (this.data.mapMarkers || []).filter(m => m.id !== markerId);
+    this.save();
   }
 }
 

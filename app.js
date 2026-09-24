@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const viewAdmin = document.getElementById('viewAdmin');
   const viewOrganizer = document.getElementById('viewOrganizer');
   const viewVolunteer = document.getElementById('viewVolunteer');
+  const viewMap = document.getElementById('viewMap');
   
   const bannerTitle = document.getElementById('bannerTitle');
   const bannerDesc = document.getElementById('bannerDesc');
@@ -22,6 +23,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Modals
   const modalCreateEvent = document.getElementById('modalCreateEvent');
   const btnOpenCreateEventModal = document.getElementById('btnOpenCreateEventModal');
+  const modalAddMarker = document.getElementById('modalAddMarker');
+  const btnOpenAddMarkerModal = document.getElementById('btnOpenAddMarkerModal');
+
+  // Map state
+  let leafletMap = null;
+  let mapMarkerLayer = null;
+  let currentMapFilter = 'ALL';
 
   // ==========================================
   // 1. Toast Notifications
@@ -44,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 2. Role Switching & Navigation
   // ==========================================
   function setRole(role) {
-    store.setCurrentRole(role);
+    store.setCurrentRole(role === 'MAP' ? store.getCurrentRole() : role);
 
     roleButtons.forEach(btn => {
       btn.classList.toggle('active', btn.dataset.role === role);
@@ -53,9 +61,17 @@ document.addEventListener('DOMContentLoaded', () => {
     viewAdmin.style.display = role === 'ADMIN' ? 'block' : 'none';
     viewOrganizer.style.display = role === 'ORGANIZER' ? 'block' : 'none';
     viewVolunteer.style.display = role === 'VOLUNTEER' ? 'block' : 'none';
+    viewMap.style.display = role === 'MAP' ? 'block' : 'none';
 
-    updateContextBanner(role);
-    renderCurrentRoleView();
+    // Hide context banner for map (it has its own header)
+    document.getElementById('contextBanner').style.display = role === 'MAP' ? 'none' : 'flex';
+
+    if (role === 'MAP') {
+      renderMapView();
+    } else {
+      updateContextBanner(role);
+      renderCurrentRoleView();
+    }
   }
 
   function updateContextBanner(role) {
@@ -726,6 +742,313 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `;
   }
+
+  // ==========================================
+  // 6. MAP VIEW — Интерактивная карта
+  // ==========================================
+  function initMap() {
+    if (leafletMap) return; // уже инициализирована
+
+    // Центр — ДГТУ, пл. Гагарина, 1, Ростов-на-Дону
+    leafletMap = L.map('mapContainer').setView([47.2313, 39.7233], 13);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | VolontiersDSTU',
+      maxZoom: 19
+    }).addTo(leafletMap);
+
+    mapMarkerLayer = L.layerGroup().addTo(leafletMap);
+
+    // Клик по карте → координаты в форму создания метки
+    leafletMap.on('click', (e) => {
+      const latInput = document.getElementById('markerLat');
+      const lngInput = document.getElementById('markerLng');
+      if (latInput && lngInput) {
+        latInput.value = e.latlng.lat.toFixed(4);
+        lngInput.value = e.latlng.lng.toFixed(4);
+      }
+      // Открываем модальное окно если оно закрыто
+      if (!modalAddMarker.classList.contains('open')) {
+        modalAddMarker.classList.add('open');
+        showToast('📍 Координаты установлены! Заполните остальные поля метки.', 'info');
+      }
+    });
+  }
+
+  function getMarkerColor(marker) {
+    if (marker.status === 'FOUND') return '#16a34a';
+    if (marker.status === 'CLOSED') return '#6b7280';
+    if (marker.type === 'SEARCH_RESCUE') return '#dc2626';
+    return '#2563eb';
+  }
+
+  function getMarkerRadius(marker) {
+    if (marker.type === 'SEARCH_RESCUE' && marker.status === 'ACTIVE') return 12;
+    return 9;
+  }
+
+  function renderMapView() {
+    // Отложенная инициализация карты (Leaflet требует видимый контейнер)
+    setTimeout(() => {
+      initMap();
+      leafletMap.invalidateSize();
+      renderMapMarkers();
+      renderMapStats();
+      renderMapSidebar();
+    }, 100);
+  }
+
+  function renderMapMarkers() {
+    if (!mapMarkerLayer) return;
+    mapMarkerLayer.clearLayers();
+
+    let markers = store.getMapMarkers('ALL');
+
+    // Применяем фильтр
+    if (currentMapFilter === 'SEARCH_RESCUE') {
+      markers = markers.filter(m => m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE');
+    } else if (currentMapFilter === 'REGULAR') {
+      markers = markers.filter(m => m.type === 'REGULAR' && m.status === 'ACTIVE');
+    } else if (currentMapFilter === 'FOUND') {
+      markers = markers.filter(m => m.status === 'FOUND');
+    }
+
+    markers.forEach(m => {
+      const color = getMarkerColor(m);
+      const radius = getMarkerRadius(m);
+      const isActive = m.status === 'ACTIVE';
+
+      const circle = L.circleMarker([m.lat, m.lng], {
+        radius: radius,
+        fillColor: color,
+        color: '#ffffff',
+        weight: 2,
+        opacity: 1,
+        fillOpacity: isActive ? 0.9 : 0.5
+      }).addTo(mapMarkerLayer);
+
+      // Пульсация для срочных поисковых меток
+      if (m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE' && m.urgency === 'HIGH') {
+        L.circleMarker([m.lat, m.lng], {
+          radius: radius + 8,
+          fillColor: color,
+          color: color,
+          weight: 1,
+          opacity: 0.3,
+          fillOpacity: 0.1
+        }).addTo(mapMarkerLayer);
+      }
+
+      const typeLabel = m.type === 'SEARCH_RESCUE' ? '🔴 Поисково-спасательная' : '🔵 Обычное волонтёрство';
+      let statusLabel = 'Активна';
+      let statusColor = color;
+      if (m.status === 'FOUND') { statusLabel = '✅ Человек найден'; statusColor = '#16a34a'; }
+      else if (m.status === 'CLOSED') { statusLabel = 'Закрыта'; statusColor = '#6b7280'; }
+
+      const urgencyHtml = m.urgency === 'HIGH' ? '<span class="urgency-badge urgency-high">Срочно</span>'
+        : m.urgency === 'MEDIUM' ? '<span class="urgency-badge urgency-medium">Средняя</span>'
+        : '<span class="urgency-badge urgency-low">Низкая</span>';
+
+      const lastSeenHtml = m.lastSeenLocation
+        ? `<div style="font-size: 0.75rem; margin-top: 0.3rem;"><strong>Последнее место:</strong> ${m.lastSeenLocation} (${m.lastSeenDate})</div>`
+        : '';
+
+      let actionsHtml = '';
+      if (m.status === 'ACTIVE') {
+        if (m.type === 'SEARCH_RESCUE') {
+          actionsHtml = `
+            <div class="map-popup-actions">
+              <button class="btn btn-accent btn-sm" onclick="window._mapMarkFound('${m.id}')">✅ Найден</button>
+              <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${m.id}')">Закрыть</button>
+            </div>`;
+        } else {
+          actionsHtml = `
+            <div class="map-popup-actions">
+              <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${m.id}')">Закрыть метку</button>
+            </div>`;
+        }
+      }
+
+      circle.bindPopup(`
+        <div class="map-popup">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+            <span style="font-size: 0.75rem; color: ${statusColor}; font-weight: 700;">${statusLabel}</span>
+            ${urgencyHtml}
+          </div>
+          <h4>${m.title}</h4>
+          <p>${m.description}</p>
+          ${lastSeenHtml}
+          <div class="map-popup-meta">
+            <div>${typeLabel}</div>
+            <div>📞 ${m.contactPhone || 'Не указан'}</div>
+            <div>👤 ${m.createdByName} • ${new Date(m.createdAt).toLocaleDateString('ru-RU')}</div>
+          </div>
+          ${actionsHtml}
+        </div>
+      `);
+    });
+  }
+
+  function renderMapStats() {
+    const all = store.getMapMarkers('ALL');
+    const searchActive = all.filter(m => m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE').length;
+    const regular = all.filter(m => m.type === 'REGULAR' && m.status === 'ACTIVE').length;
+    const found = all.filter(m => m.status === 'FOUND').length;
+
+    document.getElementById('mapStatSearchActive').textContent = searchActive;
+    document.getElementById('mapStatRegular').textContent = regular;
+    document.getElementById('mapStatFound').textContent = found;
+    document.getElementById('mapStatTotal').textContent = all.length;
+  }
+
+  function renderMapSidebar() {
+    let markers = store.getMapMarkers('ALL');
+
+    if (currentMapFilter === 'SEARCH_RESCUE') {
+      markers = markers.filter(m => m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE');
+    } else if (currentMapFilter === 'REGULAR') {
+      markers = markers.filter(m => m.type === 'REGULAR' && m.status === 'ACTIVE');
+    } else if (currentMapFilter === 'FOUND') {
+      markers = markers.filter(m => m.status === 'FOUND');
+    }
+
+    const listContainer = document.getElementById('mapMarkerList');
+
+    if (markers.length === 0) {
+      listContainer.innerHTML = `
+        <div style="text-align: center; padding: 1.5rem; color: #64748b; font-size: 0.85rem;">
+          Нет меток для выбранного фильтра
+        </div>`;
+      return;
+    }
+
+    listContainer.innerHTML = markers.map(m => {
+      const typeClass = m.status === 'FOUND' ? 'found' : m.type === 'SEARCH_RESCUE' ? 'search-rescue' : 'regular';
+      const urgencyHtml = m.urgency === 'HIGH' ? '<span class="urgency-badge urgency-high">Срочно</span>'
+        : m.urgency === 'MEDIUM' ? '<span class="urgency-badge urgency-medium">Средняя</span>'
+        : '<span class="urgency-badge urgency-low">Низкая</span>';
+      const statusText = m.status === 'FOUND' ? '✅ Найден' : m.status === 'CLOSED' ? '⬜ Закрыта' : '';
+
+      return `
+        <div class="marker-list-card ${typeClass}" data-lat="${m.lat}" data-lng="${m.lng}" data-id="${m.id}">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
+            ${urgencyHtml}
+            <span style="font-size: 0.7rem; color: #94a3b8;">${new Date(m.createdAt).toLocaleDateString('ru-RU')}</span>
+          </div>
+          <div class="marker-list-title">${m.title}</div>
+          <div class="marker-list-meta">
+            👤 ${m.createdByName} ${statusText}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Клик по карточке → полететь к метке на карте
+    listContainer.querySelectorAll('.marker-list-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const lat = parseFloat(card.dataset.lat);
+        const lng = parseFloat(card.dataset.lng);
+        if (leafletMap) {
+          leafletMap.flyTo([lat, lng], 16, { duration: 0.8 });
+          // Открываем popup
+          mapMarkerLayer.eachLayer(layer => {
+            if (layer.getLatLng && Math.abs(layer.getLatLng().lat - lat) < 0.0001 && Math.abs(layer.getLatLng().lng - lng) < 0.0001) {
+              layer.openPopup();
+            }
+          });
+        }
+      });
+    });
+  }
+
+  // Глобальные функции для кнопок в popup
+  window._mapMarkFound = function(markerId) {
+    store.updateMarkerStatus(markerId, 'FOUND');
+    showToast('🎉 Человек найден! Статус метки обновлён.');
+    renderMapMarkers();
+    renderMapStats();
+    renderMapSidebar();
+  };
+
+  window._mapCloseMarker = function(markerId) {
+    store.updateMarkerStatus(markerId, 'CLOSED');
+    showToast('Метка закрыта.');
+    renderMapMarkers();
+    renderMapStats();
+    renderMapSidebar();
+  };
+
+  // Filter Pills
+  document.getElementById('mapFilterPills').addEventListener('click', (e) => {
+    const pill = e.target.closest('.filter-pill');
+    if (!pill) return;
+
+    document.querySelectorAll('#mapFilterPills .filter-pill').forEach(p => {
+      p.classList.remove('active', 'active-danger', 'active-accent');
+    });
+
+    currentMapFilter = pill.dataset.filter;
+
+    if (currentMapFilter === 'SEARCH_RESCUE') pill.classList.add('active-danger');
+    else if (currentMapFilter === 'FOUND') pill.classList.add('active-accent');
+    else pill.classList.add('active');
+
+    renderMapMarkers();
+    renderMapSidebar();
+  });
+
+  // Add Marker Modal
+  btnOpenAddMarkerModal.addEventListener('click', () => {
+    modalAddMarker.classList.add('open');
+  });
+
+  document.querySelectorAll('[data-close-modal-marker]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      modalAddMarker.classList.remove('open');
+    });
+  });
+
+  modalAddMarker.addEventListener('click', (e) => {
+    if (e.target === modalAddMarker) modalAddMarker.classList.remove('open');
+  });
+
+  // Toggle search-rescue specific fields
+  document.getElementById('markerType').addEventListener('change', (e) => {
+    document.getElementById('searchRescueFields').style.display =
+      e.target.value === 'SEARCH_RESCUE' ? 'block' : 'none';
+  });
+
+  // Submit new marker
+  document.getElementById('formAddMarker').addEventListener('submit', (e) => {
+    e.preventDefault();
+
+    const type = document.getElementById('markerType').value;
+    const newMarker = store.addMapMarker({
+      lat: parseFloat(document.getElementById('markerLat').value),
+      lng: parseFloat(document.getElementById('markerLng').value),
+      type: type,
+      title: document.getElementById('markerTitle').value,
+      description: document.getElementById('markerDescription').value,
+      urgency: document.getElementById('markerUrgency').value,
+      contactPhone: document.getElementById('markerPhone').value,
+      lastSeenDate: type === 'SEARCH_RESCUE' ? document.getElementById('markerLastSeenDate').value : null,
+      lastSeenLocation: type === 'SEARCH_RESCUE' ? document.getElementById('markerLastSeenLocation').value : null
+    });
+
+    modalAddMarker.classList.remove('open');
+    e.target.reset();
+
+    const typeText = type === 'SEARCH_RESCUE' ? 'Поисково-спасательная метка' : 'Волонтёрская метка';
+    showToast(`📍 ${typeText} «${newMarker.title}» размещена на карте!`);
+
+    // Обновляем карту и летим к новой метке
+    renderMapMarkers();
+    renderMapStats();
+    renderMapSidebar();
+    if (leafletMap) {
+      leafletMap.flyTo([newMarker.lat, newMarker.lng], 15, { duration: 0.8 });
+    }
+  });
 
   // Initial Load
   setRole(store.getCurrentRole());

@@ -825,6 +825,207 @@ body {
   }
 }
 
+/* ========================================== */
+/* MAP — Интерактивная карта волонтёров       */
+/* ========================================== */
+#mapContainer {
+  width: 100%;
+  height: 550px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+  z-index: 1;
+}
+
+.map-layout {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 1.25rem;
+  margin-top: 1rem;
+}
+
+.map-sidebar {
+  max-height: 550px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.map-legend {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.map-legend h4 {
+  font-size: 0.9rem;
+  margin-bottom: 0.65rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--slate-600);
+  margin-bottom: 0.4rem;
+}
+
+.legend-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid white;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.15);
+}
+
+.legend-dot.search { background: #dc2626; }
+.legend-dot.regular { background: #2563eb; }
+.legend-dot.found { background: #16a34a; }
+.legend-dot.closed { background: #6b7280; }
+
+.map-filter-pills {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.filter-pill {
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--slate-300);
+  background: white;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--slate-600);
+}
+
+.filter-pill:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.filter-pill.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.filter-pill.active-danger {
+  background: #dc2626;
+  color: white;
+  border-color: #dc2626;
+}
+
+.filter-pill.active-accent {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.marker-list-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.marker-list-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.marker-list-card.search-rescue {
+  border-left: 4px solid #dc2626;
+}
+
+.marker-list-card.regular {
+  border-left: 4px solid #2563eb;
+}
+
+.marker-list-card.found {
+  border-left: 4px solid #16a34a;
+  opacity: 0.7;
+}
+
+.marker-list-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--slate-900);
+  margin-bottom: 0.25rem;
+}
+
+.marker-list-meta {
+  font-size: 0.75rem;
+  color: var(--slate-500);
+}
+
+.urgency-badge {
+  display: inline-flex;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-full);
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.urgency-high { background: #fee2e2; color: #991b1b; }
+.urgency-medium { background: #fef3c7; color: #92400e; }
+.urgency-low { background: #dbeafe; color: #1e40af; }
+
+/* Leaflet popup overrides */
+.leaflet-popup-content-wrapper {
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-lg) !important;
+  padding: 0 !important;
+}
+
+.leaflet-popup-content {
+  margin: 0 !important;
+  width: 280px !important;
+}
+
+.map-popup {
+  padding: 1rem;
+}
+
+.map-popup h4 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+
+.map-popup p {
+  font-size: 0.8rem;
+  color: var(--slate-600);
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
+}
+
+.map-popup-meta {
+  font-size: 0.75rem;
+  color: var(--slate-500);
+  border-top: 1px solid var(--slate-100);
+  padding-top: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.map-popup-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .header-container {
@@ -844,5 +1045,11 @@ body {
   }
   .form-row {
     grid-template-columns: 1fr;
+  }
+  .map-layout {
+    grid-template-columns: 1fr;
+  }
+  #mapContainer {
+    height: 400px;
   }
 }

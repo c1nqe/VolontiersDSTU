@@ -8,6 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Leaflet.js Map Library (CDN) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 </head>
 <body>
 
@@ -32,6 +35,10 @@
         </button>
         <button class="role-btn" data-role="VOLUNTEER">
           <span>🙋</span> Волонтёр
+        </button>
+        <span style="width: 1px; height: 24px; background: var(--slate-300);"></span>
+        <button class="role-btn" data-role="MAP">
+          <span>🗺️</span> Карта
         </button>
       </div>
 
@@ -401,9 +408,145 @@
           <!-- Filled by JS -->
         </div>
       </div>
+    <!-- ========================================== -->
+    <!-- 4. КАРТА ВОЛОНТЁРОВ (MAP)                  -->
+    <!-- ========================================== -->
+    <div id="viewMap" class="role-view" style="display: none;">
+      <!-- Map Stats -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-label">🔴 Активные поиски</span>
+          <span class="stat-val" id="mapStatSearchActive" style="color: #dc2626;">0</span>
+          <span class="stat-sub">Поисково-спасательные операции</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">🔵 Обычные метки</span>
+          <span class="stat-val" id="mapStatRegular" style="color: #2563eb;">0</span>
+          <span class="stat-sub">Волонтёрская помощь</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">🟢 Успешно найдены</span>
+          <span class="stat-val" id="mapStatFound" style="color: #16a34a;">0</span>
+          <span class="stat-sub">Люди возвращены домой</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Всего меток</span>
+          <span class="stat-val" id="mapStatTotal">0</span>
+          <span class="stat-sub">На карте Ростова-на-Дону</span>
+        </div>
+      </div>
+
+      <!-- Filter & Actions -->
+      <div class="toolbar no-print">
+        <div class="map-filter-pills" id="mapFilterPills">
+          <button class="filter-pill active" data-filter="ALL">Все метки</button>
+          <button class="filter-pill" data-filter="SEARCH_RESCUE">🔴 Поисково-спасательные</button>
+          <button class="filter-pill" data-filter="REGULAR">🔵 Обычные волонтёрские</button>
+          <button class="filter-pill" data-filter="FOUND">🟢 Найдены</button>
+        </div>
+        <button class="btn btn-primary" id="btnOpenAddMarkerModal">
+          📍 Поставить метку
+        </button>
+      </div>
+
+      <!-- Map + Sidebar Layout -->
+      <div class="map-layout">
+        <div>
+          <div id="mapContainer"></div>
+        </div>
+        <div class="map-sidebar">
+          <!-- Legend -->
+          <div class="map-legend">
+            <h4>🗺️ Условные обозначения</h4>
+            <div class="legend-item"><span class="legend-dot search"></span> Поисково-спасательная (активная)</div>
+            <div class="legend-item"><span class="legend-dot regular"></span> Обычное волонтёрство</div>
+            <div class="legend-item"><span class="legend-dot found"></span> Человек найден</div>
+            <div class="legend-item"><span class="legend-dot closed"></span> Закрытая метка</div>
+          </div>
+
+          <!-- Marker List -->
+          <div id="mapMarkerList">
+            <!-- Filled by JS -->
+          </div>
+        </div>
+      </div>
     </div>
 
   </main>
+
+  <!-- ========================================== -->
+  <!-- MODAL: ДОБАВЛЕНИЕ МЕТКИ НА КАРТУ           -->
+  <!-- ========================================== -->
+  <div class="modal-overlay" id="modalAddMarker">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>📍 Добавить метку на карту</h3>
+        <button class="modal-close" data-close-modal-marker>&times;</button>
+      </div>
+      <form id="formAddMarker">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Тип метки *</label>
+            <select class="form-select" id="markerType" required>
+              <option value="REGULAR">🔵 Обычное волонтёрство (помощь, субботник, доставка)</option>
+              <option value="SEARCH_RESCUE">🔴 Поисково-спасательная операция (поиск человека)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Заголовок *</label>
+            <input type="text" class="form-input" id="markerTitle" required placeholder="Например: Поиск: Иванов И.И., 65 лет">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Подробное описание *</label>
+            <textarea class="form-textarea" id="markerDescription" required placeholder="Приметы, обстоятельства, что требуется от волонтёров..."></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Широта (lat) *</label>
+              <input type="number" class="form-input" id="markerLat" step="0.0001" value="47.2310" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Долгота (lng) *</label>
+              <input type="number" class="form-input" id="markerLng" step="0.0001" value="39.7150" required>
+            </div>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--primary); background: var(--primary-light); padding: 0.6rem; border-radius: var(--radius-sm);">
+            💡 <strong>Совет:</strong> Кликните по карте — координаты подставятся автоматически!
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Срочность *</label>
+              <select class="form-select" id="markerUrgency" required>
+                <option value="HIGH">🔴 Высокая (срочно)</option>
+                <option value="MEDIUM" selected>🟡 Средняя</option>
+                <option value="LOW">🔵 Низкая</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Контактный телефон</label>
+              <input type="tel" class="form-input" id="markerPhone" placeholder="+7 (999) 000-00-00">
+            </div>
+          </div>
+          <div id="searchRescueFields" style="display: none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Дата последнего обнаружения</label>
+                <input type="date" class="form-input" id="markerLastSeenDate">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Место последнего обнаружения</label>
+                <input type="text" class="form-input" id="markerLastSeenLocation" placeholder="Адрес или ориентир">
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close-modal-marker>Отмена</button>
+          <button type="submit" class="btn btn-primary">📍 Разместить метку</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- ========================================== -->
   <!-- MODAL: СОЗДАНИЕ СОБЫТИЯ (ORGANIZER)        -->
