@@ -63,18 +63,18 @@ document.addEventListener('DOMContentLoaded', () => {
     viewVolunteer.style.display = role === 'VOLUNTEER' ? 'block' : 'none';
     viewMap.style.display = role === 'MAP' ? 'block' : 'none';
 
-    // Hide context banner for map (it has its own header)
-    document.getElementById('contextBanner').style.display = role === 'MAP' ? 'none' : 'flex';
+    updateContextBanner(role);
 
     if (role === 'MAP') {
       renderMapView();
     } else {
-      updateContextBanner(role);
       renderCurrentRoleView();
     }
   }
 
   function updateContextBanner(role) {
+    document.getElementById('contextBanner').style.display = 'flex';
+
     if (role === 'ADMIN') {
       bannerTitle.textContent = 'Рабочее место администратора';
       bannerDesc.textContent = 'Регистрация организаторов и волонтёров, согласование и отмена событий';
@@ -123,6 +123,15 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast(`Выбран волонтёр: ${store.getActiveVolunteer().fullName}`);
         renderVolunteerView();
       });
+    } else if (role === 'MAP') {
+      bannerTitle.textContent = 'Интерактивная карта волонтёров и поисков';
+      bannerDesc.textContent = 'Координация поисково-спасательных операций (ПСО) и точек помощи в г. Ростов-на-Дону';
+      contextControls.innerHTML = `
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <span class="badge" style="background: rgba(220,38,38,0.2); color: #fca5a5;">🔴 ПСО</span>
+          <span class="badge" style="background: rgba(37,99,235,0.2); color: #93c5fd;">🔵 Волонтёрство</span>
+        </div>
+      `;
     }
   }
 
@@ -746,33 +755,165 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================
   // 6. MAP VIEW — Интерактивная карта
   // ==========================================
+  let isSvgFallback = false;
+
   function initMap() {
-    if (leafletMap) return; // уже инициализирована
+    if (leafletMap || isSvgFallback) return;
 
-    // Центр — ДГТУ, пл. Гагарина, 1, Ростов-на-Дону
-    leafletMap = L.map('mapContainer').setView([47.2313, 39.7233], 13);
+    const container = document.getElementById('mapContainer');
+    if (!container) return;
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | VolontiersDSTU',
-      maxZoom: 19
-    }).addTo(leafletMap);
+    if (typeof L !== 'undefined' && typeof L.map === 'function') {
+      try {
+        leafletMap = L.map('mapContainer').setView([47.2313, 39.7233], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap | VolontiersDSTU',
+          maxZoom: 19
+        }).addTo(leafletMap);
 
-    mapMarkerLayer = L.layerGroup().addTo(leafletMap);
+        mapMarkerLayer = L.layerGroup().addTo(leafletMap);
 
-    // Клик по карте → координаты в форму создания метки
-    leafletMap.on('click', (e) => {
-      const latInput = document.getElementById('markerLat');
-      const lngInput = document.getElementById('markerLng');
-      if (latInput && lngInput) {
-        latInput.value = e.latlng.lat.toFixed(4);
-        lngInput.value = e.latlng.lng.toFixed(4);
+        leafletMap.on('click', (e) => {
+          const latInput = document.getElementById('markerLat');
+          const lngInput = document.getElementById('markerLng');
+          if (latInput && lngInput) {
+            latInput.value = e.latlng.lat.toFixed(4);
+            lngInput.value = e.latlng.lng.toFixed(4);
+          }
+          if (!modalAddMarker.classList.contains('open')) {
+            modalAddMarker.classList.add('open');
+            showToast('📍 Координаты установлены! Заполните остальные поля метки.', 'info');
+          }
+        });
+        return;
+      } catch (e) {
+        console.warn('Leaflet map error, switching to interactive vector map:', e);
       }
-      // Открываем модальное окно если оно закрыто
-      if (!modalAddMarker.classList.contains('open')) {
-        modalAddMarker.classList.add('open');
-        showToast('📍 Координаты установлены! Заполните остальные поля метки.', 'info');
-      }
-    });
+    }
+
+    // Если Leaflet недоступен (офлайн/прокси), запускаем интерактивную векторную карту Ростова-на-Дону
+    initSvgFallbackMap();
+  }
+
+  // Проекция координат Ростова-на-Дону для интерактивной векторной карты
+  function projectToSvg(lat, lng) {
+    const minLat = 47.1950, maxLat = 47.2600;
+    const minLng = 39.6700, maxLng = 39.7700;
+    const x = ((lng - minLng) / (maxLng - minLng)) * 900;
+    const y = (1 - (lat - minLat) / (maxLat - minLat)) * 550;
+    return { x: Math.max(30, Math.min(870, x)), y: Math.max(30, Math.min(520, y)) };
+  }
+
+  function unprojectFromSvg(x, y) {
+    const minLat = 47.1950, maxLat = 47.2600;
+    const minLng = 39.6700, maxLng = 39.7700;
+    const lng = minLng + (x / 900) * (maxLng - minLng);
+    const lat = maxLat - (y / 550) * (maxLat - minLat);
+    return { lat: Number(lat.toFixed(4)), lng: Number(lng.toFixed(4)) };
+  }
+
+  function initSvgFallbackMap() {
+    isSvgFallback = true;
+    const container = document.getElementById('mapContainer');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div style="position: relative; width: 100%; height: 100%; background: #e2e8f0; overflow: hidden; user-select: none;">
+        <div style="position: absolute; top: 12px; left: 14px; z-index: 10; background: rgba(255,255,255,0.92); backdrop-filter: blur(4px); padding: 6px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; display: flex; align-items: center; gap: 6px;">
+          <span>🗺️</span> <strong>Карта Ростова-на-Дону (ДГТУ)</strong>
+          <span style="color: #64748b; font-weight: normal; font-size: 0.75rem;">• Кликните в любое место, чтобы поставить метку</span>
+        </div>
+        <svg id="svgMapCanvas" viewBox="0 0 900 550" style="width: 100%; height: 100%; cursor: crosshair;">
+          <!-- Сетка и фон города -->
+          <rect width="900" height="550" fill="#f1f5f9" />
+          
+          <!-- Река Дон -->
+          <path d="M 0 460 Q 220 480 450 445 T 900 475 L 900 550 L 0 550 Z" fill="#93c5fd" />
+          <path d="M 0 460 Q 220 480 450 445 T 900 475" stroke="#60a5fa" stroke-width="3" fill="none" />
+          <text x="450" y="505" fill="#1e40af" font-size="14" font-weight="700" opacity="0.65" text-anchor="middle">р. ДОН (Левобережная набережная)</text>
+
+          <!-- Зелёные зоны и парки -->
+          <rect x="370" y="160" width="130" height="85" rx="10" fill="#bbf7d0" stroke="#86efac" />
+          <text x="435" y="205" fill="#15803d" font-size="10" font-weight="700" text-anchor="middle">Парк ДГТУ</text>
+
+          <rect x="630" y="170" width="140" height="110" rx="10" fill="#bbf7d0" stroke="#86efac" />
+          <text x="700" y="230" fill="#15803d" font-size="11" font-weight="700" text-anchor="middle">Парк Островского</text>
+
+          <rect x="310" y="320" width="105" height="70" rx="8" fill="#bbf7d0" stroke="#86efac" />
+          <text x="362" y="360" fill="#15803d" font-size="10" font-weight="700" text-anchor="middle">Парк Горького</text>
+
+          <rect x="520" y="330" width="110" height="75" rx="8" fill="#bbf7d0" stroke="#86efac" />
+          <text x="575" y="372" fill="#15803d" font-size="10" font-weight="700" text-anchor="middle">Парк Революции</text>
+
+          <!-- Основные проспекты и магистрали -->
+          <line x1="390" y1="0" x2="390" y2="460" stroke="#ffffff" stroke-width="12" />
+          <line x1="390" y1="0" x2="390" y2="460" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="8 6" />
+
+          <line x1="490" y1="0" x2="490" y2="460" stroke="#ffffff" stroke-width="14" />
+          <line x1="490" y1="0" x2="490" y2="460" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="8 6" />
+
+          <!-- Большая Садовая -->
+          <line x1="0" y1="385" x2="900" y2="385" stroke="#ffffff" stroke-width="14" />
+          <line x1="0" y1="385" x2="900" y2="385" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="8 6" />
+
+          <!-- ул. Текучёва -->
+          <line x1="0" y1="215" x2="900" y2="215" stroke="#ffffff" stroke-width="10" />
+
+          <!-- Мосты через Дон -->
+          <line x1="490" y1="445" x2="490" y2="530" stroke="#475569" stroke-width="8" />
+          <line x1="390" y1="460" x2="390" y2="530" stroke="#475569" stroke-width="8" />
+
+          <!-- Ключевые узлы -->
+          <!-- пл. Гагарина (ДГТУ) -->
+          <circle cx="490" cy="215" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="4" />
+          <text x="490" y="205" fill="#1e3a8a" font-size="9" font-weight="800" text-anchor="middle">ДГТУ</text>
+          <text x="490" y="235" fill="#1d4ed8" font-size="10" font-weight="700" text-anchor="middle">пл. Гагарина, 1</text>
+
+          <!-- Подписи улиц -->
+          <text x="496" y="80" fill="#64748b" font-size="10" font-weight="700">пр. М. Нагибина →</text>
+          <text x="496" y="280" fill="#64748b" font-size="10" font-weight="700">пр. Ворошиловский</text>
+          <text x="396" y="280" fill="#64748b" font-size="10" font-weight="700">пр. Будённовский</text>
+          <text x="180" y="380" fill="#64748b" font-size="10" font-weight="700">ул. Большая Садовая →</text>
+          <text x="180" y="210" fill="#64748b" font-size="10" font-weight="700">ул. Текучёва →</text>
+
+          <!-- Контейнер для динамических меток -->
+          <g id="svgMarkerGroup"></g>
+        </svg>
+
+        <!-- Popover карточки метки при клике на SVG -->
+        <div id="svgMarkerPopup" style="display: none; position: absolute; z-index: 100; background: white; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); padding: 16px; width: 280px; border: 1px solid #e2e8f0; pointer-events: auto;"></div>
+      </div>
+    `;
+
+    // Клик по SVG карте → получение координат и открытие модального окна
+    const svg = document.getElementById('svgMapCanvas');
+    if (svg) {
+      svg.addEventListener('click', (e) => {
+        // Если кликнули по самой метке, не открываем модалку создания
+        if (e.target.closest('.svg-marker-node')) return;
+
+        const rect = svg.getBoundingClientRect();
+        const clickX = ((e.clientX - rect.left) / rect.width) * 900;
+        const clickY = ((e.clientY - rect.top) / rect.height) * 550;
+
+        const coords = unprojectFromSvg(clickX, clickY);
+        const latInput = document.getElementById('markerLat');
+        const lngInput = document.getElementById('markerLng');
+        if (latInput && lngInput) {
+          latInput.value = coords.lat.toFixed(4);
+          lngInput.value = coords.lng.toFixed(4);
+        }
+
+        // Закрываем попап если был открыт
+        const popup = document.getElementById('svgMarkerPopup');
+        if (popup) popup.style.display = 'none';
+
+        if (!modalAddMarker.classList.contains('open')) {
+          modalAddMarker.classList.add('open');
+          showToast('📍 Координаты установлены на карте! Заполните данные метки.', 'info');
+        }
+      });
+    }
   }
 
   function getMarkerColor(marker) {
@@ -788,20 +929,19 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderMapView() {
-    // Отложенная инициализация карты (Leaflet требует видимый контейнер)
+    renderMapStats();
+    renderMapSidebar();
+
     setTimeout(() => {
       initMap();
-      leafletMap.invalidateSize();
+      if (leafletMap && typeof leafletMap.invalidateSize === 'function') {
+        leafletMap.invalidateSize();
+      }
       renderMapMarkers();
-      renderMapStats();
-      renderMapSidebar();
-    }, 100);
+    }, 80);
   }
 
   function renderMapMarkers() {
-    if (!mapMarkerLayer) return;
-    mapMarkerLayer.clearLayers();
-
     let markers = store.getMapMarkers('ALL');
 
     // Применяем фильтр
@@ -813,80 +953,186 @@ document.addEventListener('DOMContentLoaded', () => {
       markers = markers.filter(m => m.status === 'FOUND');
     }
 
-    markers.forEach(m => {
-      const color = getMarkerColor(m);
-      const radius = getMarkerRadius(m);
-      const isActive = m.status === 'ACTIVE';
+    // Режим Leaflet
+    if (leafletMap && mapMarkerLayer) {
+      mapMarkerLayer.clearLayers();
 
-      const circle = L.circleMarker([m.lat, m.lng], {
-        radius: radius,
-        fillColor: color,
-        color: '#ffffff',
-        weight: 2,
-        opacity: 1,
-        fillOpacity: isActive ? 0.9 : 0.5
-      }).addTo(mapMarkerLayer);
+      markers.forEach(m => {
+        const color = getMarkerColor(m);
+        const radius = getMarkerRadius(m);
+        const isActive = m.status === 'ACTIVE';
 
-      // Пульсация для срочных поисковых меток
-      if (m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE' && m.urgency === 'HIGH') {
-        L.circleMarker([m.lat, m.lng], {
-          radius: radius + 8,
+        const circle = L.circleMarker([m.lat, m.lng], {
+          radius: radius,
           fillColor: color,
-          color: color,
-          weight: 1,
-          opacity: 0.3,
-          fillOpacity: 0.1
+          color: '#ffffff',
+          weight: 2,
+          opacity: 1,
+          fillOpacity: isActive ? 0.9 : 0.5
         }).addTo(mapMarkerLayer);
-      }
 
-      const typeLabel = m.type === 'SEARCH_RESCUE' ? '🔴 Поисково-спасательная' : '🔵 Обычное волонтёрство';
-      let statusLabel = 'Активна';
-      let statusColor = color;
-      if (m.status === 'FOUND') { statusLabel = '✅ Человек найден'; statusColor = '#16a34a'; }
-      else if (m.status === 'CLOSED') { statusLabel = 'Закрыта'; statusColor = '#6b7280'; }
-
-      const urgencyHtml = m.urgency === 'HIGH' ? '<span class="urgency-badge urgency-high">Срочно</span>'
-        : m.urgency === 'MEDIUM' ? '<span class="urgency-badge urgency-medium">Средняя</span>'
-        : '<span class="urgency-badge urgency-low">Низкая</span>';
-
-      const lastSeenHtml = m.lastSeenLocation
-        ? `<div style="font-size: 0.75rem; margin-top: 0.3rem;"><strong>Последнее место:</strong> ${m.lastSeenLocation} (${m.lastSeenDate})</div>`
-        : '';
-
-      let actionsHtml = '';
-      if (m.status === 'ACTIVE') {
-        if (m.type === 'SEARCH_RESCUE') {
-          actionsHtml = `
-            <div class="map-popup-actions">
-              <button class="btn btn-accent btn-sm" onclick="window._mapMarkFound('${m.id}')">✅ Найден</button>
-              <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${m.id}')">Закрыть</button>
-            </div>`;
-        } else {
-          actionsHtml = `
-            <div class="map-popup-actions">
-              <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${m.id}')">Закрыть метку</button>
-            </div>`;
+        if (m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE' && m.urgency === 'HIGH') {
+          L.circleMarker([m.lat, m.lng], {
+            radius: radius + 8,
+            fillColor: color,
+            color: color,
+            weight: 1,
+            opacity: 0.3,
+            fillOpacity: 0.1
+          }).addTo(mapMarkerLayer);
         }
-      }
 
-      circle.bindPopup(`
-        <div class="map-popup">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
-            <span style="font-size: 0.75rem; color: ${statusColor}; font-weight: 700;">${statusLabel}</span>
-            ${urgencyHtml}
+        const typeLabel = m.type === 'SEARCH_RESCUE' ? '🔴 Поисково-спасательная' : '🔵 Обычное волонтёрство';
+        let statusLabel = 'Активна';
+        let statusColor = color;
+        if (m.status === 'FOUND') { statusLabel = '✅ Человек найден'; statusColor = '#16a34a'; }
+        else if (m.status === 'CLOSED') { statusLabel = 'Закрыта'; statusColor = '#6b7280'; }
+
+        const urgencyHtml = m.urgency === 'HIGH' ? '<span class="urgency-badge urgency-high">Срочно</span>'
+          : m.urgency === 'MEDIUM' ? '<span class="urgency-badge urgency-medium">Средняя</span>'
+          : '<span class="urgency-badge urgency-low">Низкая</span>';
+
+        const lastSeenHtml = m.lastSeenLocation
+          ? `<div style="font-size: 0.75rem; margin-top: 0.3rem;"><strong>Последнее место:</strong> ${m.lastSeenLocation} (${m.lastSeenDate})</div>`
+          : '';
+
+        let actionsHtml = '';
+        if (m.status === 'ACTIVE') {
+          if (m.type === 'SEARCH_RESCUE') {
+            actionsHtml = `
+              <div class="map-popup-actions">
+                <button class="btn btn-accent btn-sm" onclick="window._mapMarkFound('${m.id}')">✅ Найден</button>
+                <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${m.id}')">Закрыть</button>
+              </div>`;
+          } else {
+            actionsHtml = `
+              <div class="map-popup-actions">
+                <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${m.id}')">Закрыть метку</button>
+              </div>`;
+          }
+        }
+
+        circle.bindPopup(`
+          <div class="map-popup">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+              <span style="font-size: 0.75rem; color: ${statusColor}; font-weight: 700;">${statusLabel}</span>
+              ${urgencyHtml}
+            </div>
+            <h4>${m.title}</h4>
+            <p>${m.description}</p>
+            ${lastSeenHtml}
+            <div class="map-popup-meta">
+              <div>${typeLabel}</div>
+              <div>📞 ${m.contactPhone || 'Не указан'}</div>
+              <div>👤 ${m.createdByName} • ${new Date(m.createdAt).toLocaleDateString('ru-RU')}</div>
+            </div>
+            ${actionsHtml}
           </div>
-          <h4>${m.title}</h4>
-          <p>${m.description}</p>
-          ${lastSeenHtml}
-          <div class="map-popup-meta">
-            <div>${typeLabel}</div>
-            <div>📞 ${m.contactPhone || 'Не указан'}</div>
-            <div>👤 ${m.createdByName} • ${new Date(m.createdAt).toLocaleDateString('ru-RU')}</div>
-          </div>
-          ${actionsHtml}
-        </div>
-      `);
+        `);
+      });
+      return;
+    }
+
+    // Режим Интерактивного SVG
+    const svgGroup = document.getElementById('svgMarkerGroup');
+    if (!svgGroup) return;
+
+    svgGroup.innerHTML = markers.map(m => {
+      const pt = projectToSvg(m.lat, m.lng);
+      const color = getMarkerColor(m);
+      const isUrgent = m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE' && m.urgency === 'HIGH';
+
+      return `
+        <g class="svg-marker-node" data-id="${m.id}" data-x="${pt.x}" data-y="${pt.y}" style="cursor: pointer;">
+          ${isUrgent ? `
+            <circle cx="${pt.x}" cy="${pt.y}" r="22" fill="${color}" opacity="0.25">
+              <animate attributeName="r" values="14;26;14" dur="2s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.4;0.05;0.4" dur="2s" repeatCount="indefinite"/>
+            </circle>
+          ` : ''}
+          <circle cx="${pt.x}" cy="${pt.y}" r="${m.type === 'SEARCH_RESCUE' ? '12' : '9'}" fill="${color}" stroke="#ffffff" stroke-width="2.5" />
+          <text x="${pt.x}" y="${pt.y - 15}" fill="#0f172a" font-size="11" font-weight="700" text-anchor="middle" style="text-shadow: 0 1px 3px rgba(255,255,255,0.9);">
+            ${m.type === 'SEARCH_RESCUE' ? '🔴 ' : '🔵 '}${m.title.length > 25 ? m.title.substring(0, 25) + '...' : m.title}
+          </text>
+        </g>
+      `;
+    }).join('');
+
+    // Обработчик клика по меткам на SVG
+    svgGroup.querySelectorAll('.svg-marker-node').forEach(node => {
+      node.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const markerId = node.dataset.id;
+        openSvgMarkerPopup(markerId, parseFloat(node.dataset.x), parseFloat(node.dataset.y));
+      });
     });
+  }
+
+  function openSvgMarkerPopup(markerId, x, y) {
+    const marker = (store.getMapMarkers('ALL') || []).find(m => m.id === markerId);
+    const popup = document.getElementById('svgMarkerPopup');
+    if (!marker || !popup) return;
+
+    const color = getMarkerColor(marker);
+    const typeLabel = marker.type === 'SEARCH_RESCUE' ? '🔴 Поисково-спасательная' : '🔵 Обычное волонтёрство';
+    let statusLabel = 'Активна';
+    if (marker.status === 'FOUND') statusLabel = '✅ Человек найден';
+    else if (marker.status === 'CLOSED') statusLabel = 'Закрыта';
+
+    const urgencyHtml = marker.urgency === 'HIGH' ? '<span class="urgency-badge urgency-high">Срочно</span>'
+      : marker.urgency === 'MEDIUM' ? '<span class="urgency-badge urgency-medium">Средняя</span>'
+      : '<span class="urgency-badge urgency-low">Низкая</span>';
+
+    const lastSeenHtml = marker.lastSeenLocation
+      ? `<div style="font-size: 0.75rem; margin-top: 0.3rem;"><strong>Последнее место:</strong> ${marker.lastSeenLocation} (${marker.lastSeenDate})</div>`
+      : '';
+
+    let actionsHtml = '';
+    if (marker.status === 'ACTIVE') {
+      if (marker.type === 'SEARCH_RESCUE') {
+        actionsHtml = `
+          <div class="map-popup-actions">
+            <button class="btn btn-accent btn-sm" onclick="window._mapMarkFound('${marker.id}')">✅ Найден</button>
+            <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${marker.id}')">Закрыть</button>
+          </div>`;
+      } else {
+        actionsHtml = `
+          <div class="map-popup-actions">
+            <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${marker.id}')">Закрыть метку</button>
+          </div>`;
+      }
+    }
+
+    popup.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+        <span style="font-size: 0.75rem; color: ${color}; font-weight: 700;">${statusLabel}</span>
+        ${urgencyHtml}
+      </div>
+      <h4 style="font-size: 0.95rem; margin-bottom: 0.4rem;">${marker.title}</h4>
+      <p style="font-size: 0.8rem; color: #475569; margin-bottom: 0.4rem;">${marker.description}</p>
+      ${lastSeenHtml}
+      <div class="map-popup-meta">
+        <div>${typeLabel}</div>
+        <div>📞 ${marker.contactPhone || 'Не указан'}</div>
+        <div>👤 ${marker.createdByName}</div>
+      </div>
+      ${actionsHtml}
+      <button style="position: absolute; top: 8px; right: 8px; border: none; background: transparent; font-size: 1.1rem; cursor: pointer; color: #94a3b8;" onclick="document.getElementById('svgMarkerPopup').style.display='none'">&times;</button>
+    `;
+
+    // Позиционируем попап
+    const container = document.getElementById('mapContainer');
+    const cWidth = container.offsetWidth || 800;
+    const cHeight = container.offsetHeight || 550;
+    const relX = (x / 900) * cWidth;
+    const relY = (y / 550) * cHeight;
+
+    const left = Math.min(cWidth - 290, Math.max(10, relX - 140));
+    const top = Math.min(cHeight - 240, Math.max(10, relY - 180));
+
+    popup.style.left = `${left}px`;
+    popup.style.top = `${top}px`;
+    popup.style.display = 'block';
   }
 
   function renderMapStats() {
@@ -946,16 +1192,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // Клик по карточке → полететь к метке на карте
     listContainer.querySelectorAll('.marker-list-card').forEach(card => {
       card.addEventListener('click', () => {
+        const markerId = card.dataset.id;
         const lat = parseFloat(card.dataset.lat);
         const lng = parseFloat(card.dataset.lng);
+
         if (leafletMap) {
           leafletMap.flyTo([lat, lng], 16, { duration: 0.8 });
-          // Открываем popup
           mapMarkerLayer.eachLayer(layer => {
             if (layer.getLatLng && Math.abs(layer.getLatLng().lat - lat) < 0.0001 && Math.abs(layer.getLatLng().lng - lng) < 0.0001) {
               layer.openPopup();
             }
           });
+        } else if (isSvgFallback) {
+          const pt = projectToSvg(lat, lng);
+          openSvgMarkerPopup(markerId, pt.x, pt.y);
         }
       });
     });
@@ -965,6 +1215,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window._mapMarkFound = function(markerId) {
     store.updateMarkerStatus(markerId, 'FOUND');
     showToast('🎉 Человек найден! Статус метки обновлён.');
+    const popup = document.getElementById('svgMarkerPopup');
+    if (popup) popup.style.display = 'none';
     renderMapMarkers();
     renderMapStats();
     renderMapSidebar();
@@ -973,6 +1225,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window._mapCloseMarker = function(markerId) {
     store.updateMarkerStatus(markerId, 'CLOSED');
     showToast('Метка закрыта.');
+    const popup = document.getElementById('svgMarkerPopup');
+    if (popup) popup.style.display = 'none';
     renderMapMarkers();
     renderMapStats();
     renderMapSidebar();
@@ -1047,6 +1301,9 @@ document.addEventListener('DOMContentLoaded', () => {
     renderMapSidebar();
     if (leafletMap) {
       leafletMap.flyTo([newMarker.lat, newMarker.lng], 15, { duration: 0.8 });
+    } else if (isSvgFallback) {
+      const pt = projectToSvg(newMarker.lat, newMarker.lng);
+      openSvgMarkerPopup(newMarker.id, pt.x, pt.y);
     }
   });
 
