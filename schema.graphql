@@ -17,6 +17,26 @@ enum RequestStatus {
   CONFIRMED   # Факт работы подтвержден организатором с начислением часов
 }
 
+enum UserRole {
+  ADMIN       # Администратор сервиса
+  ORGANIZER   # Организатор событий
+  VOLUNTEER   # Волонтёр (студент)
+}
+
+type User {
+  id: ID!
+  firstName: String!
+  lastName: String!
+  email: String!
+  role: UserRole!
+  createdAt: String!
+}
+
+type AuthPayload {
+  token: String!
+  user: User!
+}
+
 type Organization {
   id: ID!
   name: String!
@@ -103,12 +123,30 @@ type Query {
   requests(volonteerId: ID, eventId: ID, status: RequestStatus): [VolonteerEventRequest!]!
   request(id: ID!): VolonteerEventRequest
 
+  # Авторизация и профиль
+  me: User
+  users: [User!]!
+
   # Выписка об отработанных часах на закрытых событиях (CONFIRMED) за период
   volonteerStatement(volonteerId: ID!, startDate: String!, endDate: String!): StatementReport!
 }
 
 # Mutations
 type Mutation {
+  # Аутентификация (JWT)
+  register(
+    firstName: String!
+    lastName: String!
+    email: String!
+    password: String!
+    role: UserRole!
+  ): AuthPayload!
+
+  login(
+    email: String!
+    password: String!
+  ): AuthPayload!
+
   # Администратор
   registerOrganization(
     name: String!

@@ -47,9 +47,10 @@
         </button>
       </div>
 
-      <div class="header-actions">
+      <div class="header-actions" id="authHeaderArea">
+        <!-- Will be dynamically populated by JS with User Chip or Login/Register buttons -->
         <button class="btn-secondary-sm" id="btnResetData" title="Сбросить к исходным демонстрационным данным">
-          🔄 Сброс демо-данных
+          🔄 Сброс демо
         </button>
       </div>
     </div>
@@ -607,6 +608,181 @@
           <button type="submit" class="btn btn-primary">Отправить на модерацию</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: ВХОД В СИСТЕМУ (LOGIN)              -->
+  <!-- ========================================== -->
+  <div class="modal-overlay" id="modalLogin">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>🔐 Вход в личный кабинет</h3>
+        <button class="modal-close" data-close-modal-login>&times;</button>
+      </div>
+      <form id="formLogin">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Адрес электронной почты *</label>
+            <input type="email" class="form-input" id="loginEmail" required placeholder="name@donstu.ru">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Пароль *</label>
+            <input type="password" class="form-input" id="loginPassword" required placeholder="••••••••">
+          </div>
+
+          <!-- Быстрый демо-вход для тестирования -->
+          <div class="demo-login-box">
+            <p>⚡ Быстрый вход для тестирования (выберите аккаунт):</p>
+            <div class="demo-chips">
+              <button type="button" class="demo-chip" data-demo-email="admin@donstu.ru" data-demo-pass="admin123">
+                🔑 Администратор
+              </button>
+              <button type="button" class="demo-chip" data-demo-email="organizer@donstu.ru" data-demo-pass="org123">
+                🏢 Организатор
+              </button>
+              <button type="button" class="demo-chip" data-demo-email="volunteer@donstu.ru" data-demo-pass="vol123">
+                🙋 Волонтёр
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="justify-content: space-between;">
+          <button type="button" class="btn btn-outline btn-sm" id="btnSwitchToRegister">
+            Нет аккаунта? Зарегистрироваться
+          </button>
+          <button type="submit" class="btn btn-primary">Войти в аккаунт</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: РЕГИСТРАЦИЯ С ВЫБОРОМ РОЛИ         -->
+  <!-- ========================================== -->
+  <div class="modal-overlay" id="modalRegister">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>📝 Регистрация в сервисе «Волонтёры»</h3>
+        <button class="modal-close" data-close-modal-register>&times;</button>
+      </div>
+      <form id="formRegister">
+        <div class="modal-body">
+          <!-- Выбор роли: Волонтёр, Организатор, Администратор -->
+          <label class="form-label">Выберите тип вашей учётной записи *</label>
+          <div class="role-radio-group" id="regRoleSelector">
+            <div class="role-radio-card active" data-role="VOLUNTEER">
+              <span class="role-icon">🙋</span>
+              <span class="role-title">Волонтёр</span>
+              <span class="role-subtitle">Студент ДГТУ</span>
+            </div>
+            <div class="role-radio-card" data-role="ORGANIZER">
+              <span class="role-icon">🏢</span>
+              <span class="role-title">Организатор</span>
+              <span class="role-subtitle">Создатель событий</span>
+            </div>
+            <div class="role-radio-card" data-role="ADMIN">
+              <span class="role-icon">🔑</span>
+              <span class="role-title">Администратор</span>
+              <span class="role-subtitle">Координатор</span>
+            </div>
+          </div>
+          <input type="hidden" id="regSelectedRole" value="VOLUNTEER">
+
+          <!-- Имя и Фамилия -->
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Имя *</label>
+              <input type="text" class="form-input" id="regFirstName" required placeholder="Например: Иван">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Фамилия *</label>
+              <input type="text" class="form-input" id="regLastName" required placeholder="Например: Петров">
+            </div>
+          </div>
+
+          <!-- Почта -->
+          <div class="form-group">
+            <label class="form-label">Адрес электронной почты (Email) *</label>
+            <input type="email" class="form-input" id="regEmail" required placeholder="ivan.petrov@donstu.ru">
+          </div>
+
+          <!-- Пароль -->
+          <div class="form-group">
+            <label class="form-label">Придумайте пароль *</label>
+            <input type="password" class="form-input" id="regPassword" minlength="4" required placeholder="Минимум 4 символа">
+          </div>
+
+          <p style="font-size: 0.8rem; color: var(--slate-500); background: var(--slate-50); padding: 0.6rem; border-radius: var(--radius-sm);">
+            🛡️ При регистрации вам сразу будет сгенерирован <strong>защищённый JWT-токен</strong> сессии для доступа к API сервиса.
+          </p>
+        </div>
+        <div class="modal-footer" style="justify-content: space-between;">
+          <button type="button" class="btn btn-outline btn-sm" id="btnSwitchToLogin">
+            Уже есть аккаунт? Войти
+          </button>
+          <button type="submit" class="btn btn-primary">Зарегистрироваться</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: ЛИЧНЫЙ КАБИНЕТ (USER PROFILE)       -->
+  <!-- ========================================== -->
+  <div class="modal-overlay" id="modalProfile">
+    <div class="modal-dialog" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3>👤 Личный кабинет пользователя</h3>
+        <button class="modal-close" data-close-modal-profile>&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Profile Hero -->
+        <div class="profile-hero">
+          <div class="avatar-circle lg" id="profileAvatarLg">АК</div>
+          <div class="profile-hero-info">
+            <h4 id="profileFullName">Координаторов Алексей</h4>
+            <p id="profileEmail">admin@donstu.ru</p>
+            <div style="margin-top: 0.4rem; display: flex; gap: 0.5rem; align-items: center;">
+              <span class="badge badge-accepted" id="profileRoleBadge">Администратор</span>
+              <span style="font-size: 0.75rem; color: #64748b;" id="profileCreatedAt">Аккаунт активен</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Role-Specific Details -->
+        <div id="profileRoleDetails" style="margin-bottom: 1.25rem;">
+          <!-- Dynamically filled with Volunteer/Org/Admin specific details -->
+        </div>
+
+        <!-- Interactive JWT Token Inspector -->
+        <div>
+          <div class="jwt-inspector">
+            <div class="jwt-header-bar">
+              <span style="color: #38bdf8; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+                <span>🔒</span> JWT Токен сессии (RFC 7519)
+              </span>
+              <button type="button" class="btn-secondary-sm" id="btnCopyJWT" style="font-size: 0.7rem; padding: 2px 8px; background: #1e293b; color: white; border-color: #475569;">
+                📋 Скопировать токен
+              </button>
+            </div>
+            
+            <p style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 0.4rem;">
+              Структура токена: <span class="jwt-part-header">Header</span>.<span class="jwt-part-payload">Payload</span>.<span class="jwt-part-signature">Signature</span>
+            </p>
+            <div class="jwt-token-raw" id="jwtTokenDisplay"></div>
+
+            <p style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 0.3rem;">Декодированная полезная нагрузка (Payload):</p>
+            <pre class="jwt-decoded-view" id="jwtDecodedDisplay"></pre>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <button type="button" class="btn btn-danger btn-sm" id="btnProfileLogout">
+          🚪 Выйти из аккаунта
+        </button>
+        <button type="button" class="btn btn-outline" data-close-modal-profile>Закрыть</button>
+      </div>
     </div>
   </div>
 

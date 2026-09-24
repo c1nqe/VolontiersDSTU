@@ -18,13 +18,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const bannerDesc = document.getElementById('bannerDesc');
   const contextControls = document.getElementById('contextControls');
   const toastContainer = document.getElementById('toastContainer');
-  const btnResetData = document.getElementById('btnResetData');
+  const authHeaderArea = document.getElementById('authHeaderArea');
 
   // Modals
   const modalCreateEvent = document.getElementById('modalCreateEvent');
   const btnOpenCreateEventModal = document.getElementById('btnOpenCreateEventModal');
   const modalAddMarker = document.getElementById('modalAddMarker');
   const btnOpenAddMarkerModal = document.getElementById('btnOpenAddMarkerModal');
+  const modalLogin = document.getElementById('modalLogin');
+  const modalRegister = document.getElementById('modalRegister');
+  const modalProfile = document.getElementById('modalProfile');
 
   // Map state
   let leafletMap = null;
@@ -1307,6 +1310,288 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // ==========================================
+  // 7. AUTH & PERSONAL ACCOUNT (ЛИЧНЫЙ КАБИНЕТ)
+  // ==========================================
+  function renderAuthHeader() {
+    if (!authHeaderArea) return;
+    const user = store.getCurrentUser();
+
+    if (user) {
+      const initials = (user.firstName.charAt(0) + user.lastName.charAt(0)).toUpperCase();
+      let roleBadgeClass = 'badge-pending';
+      let roleText = 'Волонтёр';
+      if (user.role === 'ADMIN') { roleBadgeClass = 'badge-accepted'; roleText = 'Админ'; }
+      else if (user.role === 'ORGANIZER') { roleBadgeClass = 'badge-confirmed'; roleText = 'Организатор'; }
+
+      authHeaderArea.innerHTML = `
+        <div class="user-chip" id="btnUserChip" title="Открыть личный кабинет">
+          <div class="avatar-circle">${initials}</div>
+          <span>${user.lastName} ${user.firstName.charAt(0)}.</span>
+          <span class="badge ${roleBadgeClass}" style="font-size: 0.65rem;">${roleText}</span>
+        </div>
+        <button class="btn-secondary-sm" id="btnHeaderProfile">👤 Кабинет</button>
+        <button class="btn-secondary-sm" id="btnLogout" title="Выйти из учётной записи">🚪 Выйти</button>
+        <button class="btn-secondary-sm" id="btnResetData" title="Сбросить к исходным демонстрационным данным">🔄 Сброс демо</button>
+      `;
+
+      document.getElementById('btnUserChip').addEventListener('click', openProfileModal);
+      document.getElementById('btnHeaderProfile').addEventListener('click', openProfileModal);
+      document.getElementById('btnLogout').addEventListener('click', () => {
+        store.logout();
+        showToast('Вы вышли из учётной записи', 'info');
+        renderAuthHeader();
+      });
+    } else {
+      authHeaderArea.innerHTML = `
+        <button class="btn btn-primary btn-sm" id="btnOpenLogin">🔐 Войти</button>
+        <button class="btn btn-accent btn-sm" id="btnOpenRegister">📝 Регистрация</button>
+        <button class="btn-secondary-sm" id="btnResetData" title="Сбросить к исходным демонстрационным данным">🔄 Сброс демо</button>
+      `;
+
+      document.getElementById('btnOpenLogin').addEventListener('click', () => {
+        modalLogin.classList.add('open');
+      });
+      document.getElementById('btnOpenRegister').addEventListener('click', () => {
+        modalRegister.classList.add('open');
+      });
+    }
+
+    const resetBtn = document.getElementById('btnResetData');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        if (confirm('Сбросить все данные к исходным демонстрационным?')) {
+          store.reset();
+          showToast('Данные успешно сброшены к начальным!');
+          renderAuthHeader();
+          setRole(store.getCurrentRole());
+        }
+      });
+    }
+  }
+
+  function openProfileModal() {
+    const user = store.getCurrentUser();
+    if (!user) {
+      modalLogin.classList.add('open');
+      return;
+    }
+
+    const initials = (user.firstName.charAt(0) + user.lastName.charAt(0)).toUpperCase();
+    document.getElementById('profileAvatarLg').textContent = initials;
+    document.getElementById('profileFullName').textContent = `${user.lastName} ${user.firstName}`;
+    document.getElementById('profileEmail').textContent = user.email;
+
+    const roleBadge = document.getElementById('profileRoleBadge');
+    if (user.role === 'ADMIN') {
+      roleBadge.className = 'badge badge-accepted';
+      roleBadge.textContent = '🔑 Администратор сервиса';
+    } else if (user.role === 'ORGANIZER') {
+      roleBadge.className = 'badge badge-confirmed';
+      roleBadge.textContent = '🏢 Организатор событий';
+    } else {
+      roleBadge.className = 'badge badge-pending';
+      roleBadge.textContent = '🙋 Волонтёр ДГТУ';
+    }
+
+    document.getElementById('profileCreatedAt').textContent =
+      `Зарегистрирован: ${new Date(user.createdAt || Date.now()).toLocaleDateString('ru-RU')}`;
+
+    // Role-specific details
+    const detailsBox = document.getElementById('profileRoleDetails');
+    if (user.role === 'VOLUNTEER') {
+      const vol = store.getActiveVolunteer();
+      detailsBox.innerHTML = `
+        <div style="background: var(--slate-50); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1rem; font-size: 0.85rem;">
+          <div style="font-weight: 700; color: var(--slate-900); margin-bottom: 0.4rem;">Электронная волонтёрская книжка ДГТУ</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; color: var(--slate-600);">
+            <div><strong>Студенческий билет:</strong> ${vol ? vol.studentId : 'СТ-2025-1042'}</div>
+            <div><strong>Факультет:</strong> ${vol ? vol.faculty : 'ИиВТ'}</div>
+            <div><strong>Подтверждённых часов:</strong> <span style="color: #16a34a; font-weight: 800;">${vol ? vol.totalConfirmedHours : 8} ч.</span></div>
+            <div><strong>Статус верификации:</strong> <span style="color: #2563eb; font-weight: 700;">Подтверждён ВЦ ДГТУ</span></div>
+          </div>
+        </div>
+      `;
+    } else if (user.role === 'ORGANIZER') {
+      const org = store.getActiveOrg();
+      const eventsCount = store.getEvents().filter(e => e.organizationId === (org ? org.id : '')).length;
+      detailsBox.innerHTML = `
+        <div style="background: var(--slate-50); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1rem; font-size: 0.85rem;">
+          <div style="font-weight: 700; color: var(--slate-900); margin-bottom: 0.4rem;">Профиль аккредитованной организации</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; color: var(--slate-600);">
+            <div><strong>Организация:</strong> ${org ? org.name : 'Волонтёрский центр'}</div>
+            <div><strong>Контактное лицо:</strong> ${org ? org.contactPerson : user.lastName + ' ' + user.firstName}</div>
+            <div><strong>ИНН:</strong> ${org ? (org.inn || '6165033140') : '6165033140'}</div>
+            <div><strong>Создано событий:</strong> <span style="color: #2563eb; font-weight: 800;">${eventsCount}</span></div>
+          </div>
+        </div>
+      `;
+    } else {
+      detailsBox.innerHTML = `
+        <div style="background: var(--slate-50); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1rem; font-size: 0.85rem;">
+          <div style="font-weight: 700; color: var(--slate-900); margin-bottom: 0.4rem;">Полномочия Администратора платформы</div>
+          <div style="color: var(--slate-600); line-height: 1.5;">
+            Главный координатор волонтёрских инициатив университета. Доступны: модерация событий, регистрация организаций и волонтёров, системный аудит и экспорт выписок.
+          </div>
+        </div>
+      `;
+    }
+
+    // JWT Token Inspector
+    const rawToken = store.getJWTToken() || '';
+    const tokenParts = rawToken.split('.');
+    const displayEl = document.getElementById('jwtTokenDisplay');
+    if (tokenParts.length === 3) {
+      displayEl.innerHTML = `
+        <span class="jwt-part-header">${tokenParts[0]}</span>.<span class="jwt-part-payload">${tokenParts[1]}</span>.<span class="jwt-part-signature">${tokenParts[2]}</span>
+      `;
+    } else {
+      displayEl.textContent = rawToken;
+    }
+
+    const decoded = store.getDecodedJWT();
+    document.getElementById('jwtDecodedDisplay').textContent =
+      decoded ? JSON.stringify({ header: decoded.header, payload: decoded.payload }, null, 2) : 'Токен отсутствует';
+
+    modalProfile.classList.add('open');
+  }
+
+  // Copy JWT Token to clipboard
+  const btnCopyJWT = document.getElementById('btnCopyJWT');
+  if (btnCopyJWT) {
+    btnCopyJWT.addEventListener('click', () => {
+      const token = store.getJWTToken();
+      if (token) {
+        navigator.clipboard.writeText(token).then(() => {
+          showToast('📋 JWT токен скопирован в буфер обмена!');
+        }).catch(() => {
+          showToast('Токен: ' + token.substring(0, 20) + '...', 'info');
+        });
+      }
+    });
+  }
+
+  // Logout from profile modal
+  const btnProfileLogout = document.getElementById('btnProfileLogout');
+  if (btnProfileLogout) {
+    btnProfileLogout.addEventListener('click', () => {
+      store.logout();
+      modalProfile.classList.remove('open');
+      showToast('Вы вышли из личного кабинета', 'info');
+      renderAuthHeader();
+    });
+  }
+
+  // Registration: Role card selector
+  document.querySelectorAll('#regRoleSelector .role-radio-card').forEach(card => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('#regRoleSelector .role-radio-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      document.getElementById('regSelectedRole').value = card.dataset.role;
+    });
+  });
+
+  // Registration Form Submission
+  const formRegister = document.getElementById('formRegister');
+  if (formRegister) {
+    formRegister.addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const role = document.getElementById('regSelectedRole').value;
+      const firstName = document.getElementById('regFirstName').value.trim();
+      const lastName = document.getElementById('regLastName').value.trim();
+      const email = document.getElementById('regEmail').value.trim();
+      const password = document.getElementById('regPassword').value;
+
+      const res = store.register({ firstName, lastName, email, password, role });
+      if (!res.success) {
+        showToast(res.message, 'error');
+        return;
+      }
+
+      modalRegister.classList.remove('open');
+      formRegister.reset();
+
+      const roleRu = role === 'ADMIN' ? 'Администратора' : role === 'ORGANIZER' ? 'Организатора' : 'Волонтёра';
+      showToast(`🎉 Аккаунт ${roleRu} успешно создан! JWT токен выдан.`);
+
+      renderAuthHeader();
+      setRole(role);
+    });
+  }
+
+  // Login Form Submission
+  const formLogin = document.getElementById('formLogin');
+  if (formLogin) {
+    formLogin.addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+
+      const res = store.login(email, password);
+      if (!res.success) {
+        showToast(res.message, 'error');
+        return;
+      }
+
+      modalLogin.classList.remove('open');
+      formLogin.reset();
+
+      showToast(`👋 Добро пожаловать, ${res.user.firstName}! Авторизация по JWT успешна.`);
+
+      renderAuthHeader();
+      setRole(res.user.role);
+    });
+  }
+
+  // Demo chips in Login modal
+  document.querySelectorAll('.demo-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.getElementById('loginEmail').value = chip.dataset.demoEmail;
+      document.getElementById('loginPassword').value = chip.dataset.demoPass;
+      showToast('Данные аккаунта подставлены! Нажмите «Войти».', 'info');
+    });
+  });
+
+  // Modal switching links
+  const btnSwitchToRegister = document.getElementById('btnSwitchToRegister');
+  if (btnSwitchToRegister) {
+    btnSwitchToRegister.addEventListener('click', () => {
+      modalLogin.classList.remove('open');
+      modalRegister.classList.add('open');
+    });
+  }
+
+  const btnSwitchToLogin = document.getElementById('btnSwitchToLogin');
+  if (btnSwitchToLogin) {
+    btnSwitchToLogin.addEventListener('click', () => {
+      modalRegister.classList.remove('open');
+      modalLogin.classList.add('open');
+    });
+  }
+
+  // Close modal buttons
+  document.querySelectorAll('[data-close-modal-login]').forEach(btn => {
+    btn.addEventListener('click', () => modalLogin.classList.remove('open'));
+  });
+  document.querySelectorAll('[data-close-modal-register]').forEach(btn => {
+    btn.addEventListener('click', () => modalRegister.classList.remove('open'));
+  });
+  document.querySelectorAll('[data-close-modal-profile]').forEach(btn => {
+    btn.addEventListener('click', () => modalProfile.classList.remove('open'));
+  });
+
+  // Click outside to close modals
+  [modalLogin, modalRegister, modalProfile].forEach(m => {
+    if (m) {
+      m.addEventListener('click', (e) => {
+        if (e.target === m) m.classList.remove('open');
+      });
+    }
+  });
+
   // Initial Load
+  renderAuthHeader();
   setRole(store.getCurrentRole());
 });

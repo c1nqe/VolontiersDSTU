@@ -4,11 +4,97 @@
  */
 
 const STORAGE_KEY = 'volontiers_dstu_state_v1';
+const JWT_SECRET = 'DSTU_VOLONTIERS_SECRET_KEY_2025';
+
+// Утилиты для работы с JWT (RFC 7519)
+function base64UrlEncode(str) {
+  return btoa(unescape(encodeURIComponent(str)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function base64UrlDecode(str) {
+  str = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (str.length % 4) {
+    str += '=';
+  }
+  return decodeURIComponent(escape(atob(str)));
+}
+
+function generateJWT(payload, secret = JWT_SECRET) {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const encodedPayload = base64UrlEncode(JSON.stringify({
+    ...payload,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // Срок действия 24 часа
+  }));
+
+  // Формирование детерминированной подписи токена
+  let hash = 0;
+  const signatureInput = `${encodedHeader}.${encodedPayload}.${secret}`;
+  for (let i = 0; i < signatureInput.length; i++) {
+    hash = ((hash << 5) - hash) + signatureInput.charCodeAt(i);
+    hash |= 0;
+  }
+  const encodedSignature = base64UrlEncode('sig_' + Math.abs(hash).toString(16) + '_dstu');
+  return `${encodedHeader}.${encodedPayload}.${encodedSignature}`;
+}
+
+function decodeJWT(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const header = JSON.parse(base64UrlDecode(parts[0]));
+    const payload = JSON.parse(base64UrlDecode(parts[1]));
+    const isExpired = payload.exp && payload.exp < Math.floor(Date.now() / 1000);
+    return { header, payload, isExpired, raw: token };
+  } catch (e) {
+    console.error('Ошибка декодирования JWT токена:', e);
+    return null;
+  }
+}
 
 const INITIAL_DATA = {
   currentUserRole: 'ADMIN', // ADMIN | ORGANIZER | VOLUNTEER
   activeVolunteerId: 'vol-1',
   activeOrgId: 'org-1',
+  currentUserId: 'usr-admin-1',
+  jwtToken: null,
+
+  // Пользователи системы с учетными записями
+  users: [
+    {
+      id: 'usr-admin-1',
+      firstName: 'Алексей',
+      lastName: 'Координаторов',
+      email: 'admin@donstu.ru',
+      password: 'admin123',
+      role: 'ADMIN',
+      createdAt: '2026-09-01T10:00:00Z'
+    },
+    {
+      id: 'usr-org-1',
+      firstName: 'Екатерина',
+      lastName: 'Смирнова',
+      email: 'organizer@donstu.ru',
+      password: 'org123',
+      role: 'ORGANIZER',
+      orgId: 'org-1',
+      createdAt: '2026-09-01T11:00:00Z'
+    },
+    {
+      id: 'usr-vol-1',
+      firstName: 'Алексей',
+      lastName: 'Иванов',
+      email: 'volunteer@donstu.ru',
+      password: 'vol123',
+      role: 'VOLUNTEER',
+      volunteerId: 'vol-1',
+      createdAt: '2026-09-02T12:00:00Z'
+    }
+  ],
   
   organizations: [
     {
@@ -279,9 +365,34 @@ class DataStore {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
+        let updated = false;
+
         // Обратная совместимость: если mapMarkers ещё нет в сохранённых данных
         if (!parsed.mapMarkers) {
           parsed.mapMarkers = JSON.parse(JSON.stringify(INITIAL_DATA.mapMarkers));
+          updated = true;
+        }
+
+        // Обратная совместимость: пользователи и JWT
+        if (!parsed.users || parsed.users.length === 0) {
+          parsed.users = JSON.parse(JSON.stringify(INITIAL_DATA.users));
+          parsed.currentUserId = INITIAL_DATA.currentUserId;
+          updated = true;
+        }
+
+        if (!parsed.jwtToken) {
+          const defaultUser = parsed.users[0];
+          parsed.jwtToken = generateJWT({
+            sub: defaultUser.id,
+            email: defaultUser.email,
+            role: defaultUser.role,
+            firstName: defaultUser.firstName,
+            lastName: defaultUser.lastName
+          });
+          updated = true;
+        }
+
+        if (updated) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
         }
         return parsed;
@@ -289,8 +400,17 @@ class DataStore {
     } catch (e) {
       console.error('Ошибка загрузки из localStorage', e);
     }
-    this.save(INITIAL_DATA);
-    return JSON.parse(JSON.stringify(INITIAL_DATA));
+    
+    const fresh = JSON.parse(JSON.stringify(INITIAL_DATA));
+    fresh.jwtToken = generateJWT({
+      sub: fresh.users[0].id,
+      email: fresh.users[0].email,
+      role: fresh.users[0].role,
+      firstName: fresh.users[0].firstName,
+      lastName: fresh.users[0].lastName
+    });
+    this.save(fresh);
+    return fresh;
   }
 
   save(dataToSave = this.data) {
@@ -304,8 +424,148 @@ class DataStore {
   reset() {
     localStorage.removeItem(STORAGE_KEY);
     this.data = JSON.parse(JSON.stringify(INITIAL_DATA));
+    this.data.jwtToken = generateJWT({
+      sub: this.data.users[0].id,
+      email: this.data.users[0].email,
+      role: this.data.users[0].role,
+      firstName: this.data.users[0].firstName,
+      lastName: this.data.users[0].lastName
+    });
     this.save();
     return this.data;
+  }
+
+  // ============================================
+  // АУТЕНТИФИКАЦИЯ И JWT (AUTH & TOKENS)
+  // ============================================
+  getCurrentUser() {
+    if (!this.data.currentUserId) return null;
+    return this.data.users.find(u => u.id === this.data.currentUserId) || null;
+  }
+
+  getJWTToken() {
+    return this.data.jwtToken;
+  }
+
+  getDecodedJWT() {
+    return this.data.jwtToken ? decodeJWT(this.data.jwtToken) : null;
+  }
+
+  login(email, password) {
+    const user = this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+    if (!user) {
+      return { success: false, message: 'Пользователь с таким email не найден.' };
+    }
+    if (user.password !== password) {
+      return { success: false, message: 'Неверный пароль. Попробуйте снова.' };
+    }
+
+    // Генерация нового JWT токена
+    const token = generateJWT({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      firstName: user.firstName,
+      lastName: user.lastName
+    });
+
+    this.data.currentUserId = user.id;
+    this.data.currentUserRole = user.role;
+    this.data.jwtToken = token;
+
+    if (user.volunteerId) this.data.activeVolunteerId = user.volunteerId;
+    if (user.orgId) this.data.activeOrgId = user.orgId;
+
+    this.save();
+    return { success: true, user, token };
+  }
+
+  register({ firstName, lastName, email, password, role }) {
+    const cleanEmail = email.toLowerCase().trim();
+    const existing = this.data.users.find(u => u.email.toLowerCase() === cleanEmail);
+    if (existing) {
+      return { success: false, message: 'Пользователь с таким адресом электронной почты уже зарегистрирован!' };
+    }
+
+    const userId = 'usr-' + Date.now();
+    const fullName = `${lastName.trim()} ${firstName.trim()}`;
+    let linkedVolunteerId = null;
+    let linkedOrgId = null;
+
+    // В зависимости от роли создаем связанную сущность в системе
+    if (role === 'VOLUNTEER') {
+      const newVol = this.addVolunteer({
+        fullName: fullName,
+        email: cleanEmail,
+        phone: '+7 (900) 000-00-00',
+        faculty: 'Донской государственный технический университет',
+        studentId: 'СТ-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000)
+      });
+      linkedVolunteerId = newVol.id;
+      this.data.activeVolunteerId = newVol.id;
+    } else if (role === 'ORGANIZER') {
+      const newOrg = this.addOrganization({
+        name: `Организация: ${fullName}`,
+        contactPerson: fullName,
+        email: cleanEmail,
+        phone: '+7 (863) 200-00-00',
+        description: 'Новый организатор социально-волонтёрских инициатив'
+      });
+      linkedOrgId = newOrg.id;
+      this.data.activeOrgId = newOrg.id;
+    }
+
+    const newUser = {
+      id: userId,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: cleanEmail,
+      password: password,
+      role: role,
+      volunteerId: linkedVolunteerId,
+      orgId: linkedOrgId,
+      createdAt: new Date().toISOString()
+    };
+
+    this.data.users.push(newUser);
+
+    // Генерируем JWT токен
+    const token = generateJWT({
+      sub: newUser.id,
+      email: newUser.email,
+      role: newUser.role,
+      firstName: newUser.firstName,
+      lastName: newUser.lastName
+    });
+
+    this.data.currentUserId = newUser.id;
+    this.data.currentUserRole = role;
+    this.data.jwtToken = token;
+
+    this.save();
+    return { success: true, user: newUser, token };
+  }
+
+  logout() {
+    this.data.currentUserId = null;
+    this.data.jwtToken = null;
+    this.save();
+  }
+
+  updateUserProfile(userId, updates) {
+    const user = this.data.users.find(u => u.id === userId);
+    if (!user) return null;
+    Object.assign(user, updates);
+    // Обновляем токен с новыми данными
+    this.data.jwtToken = generateJWT({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      firstName: user.firstName,
+      lastName: user.lastName
+    });
+    this.save();
+    return user;
   }
 
   // Роли и пользователи
