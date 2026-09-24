@@ -6,9 +6,28 @@
 document.addEventListener('DOMContentLoaded', () => {
   const store = window.appStore;
 
+  // SVG Icon helper set (vector icons instead of emojis)
+  const ICONS = {
+    calendar: `<svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`,
+    clock: `<svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`,
+    mapPin: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>`,
+    users: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
+    user: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`,
+    building: `<svg class="svg-icon" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><path d="M9 22v-4h6v4"></path><path d="M8 6h.01"></path><path d="M16 6h.01"></path><path d="M12 6h.01"></path><path d="M8 10h.01"></path><path d="M12 10h.01"></path><path d="M16 10h.01"></path></svg>`,
+    shield: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`,
+    map: `<svg class="svg-icon" viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>`,
+    check: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
+    award: `<svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="7"></circle><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline></svg>`,
+    search: `<svg class="svg-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`,
+    lock: `<svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`,
+    logout: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>`,
+    plus: `<svg class="svg-icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`,
+    cross: `<svg class="svg-icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
+  };
+
   // DOM Elements
   const roleSelector = document.getElementById('roleSelector');
-  const roleButtons = roleSelector.querySelectorAll('.role-btn');
+  const viewPublic = document.getElementById('viewPublic');
   const viewAdmin = document.getElementById('viewAdmin');
   const viewOrganizer = document.getElementById('viewOrganizer');
   const viewVolunteer = document.getElementById('viewVolunteer');
@@ -40,8 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function showToast(message, type = 'success') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
-    toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+    const icon = type === 'success' ? ICONS.check : type === 'error' ? ICONS.cross : ICONS.lock;
+    toast.innerHTML = `<span style="display: flex; align-items: center;">${icon}</span><span>${message}</span>`;
     toastContainer.appendChild(toast);
     setTimeout(() => {
       toast.style.opacity = '0';
@@ -52,15 +71,68 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==========================================
-  // 2. Role Switching & Navigation
+  // 2. Role Switching & Dynamic Navigation
   // ==========================================
+  function renderRoleSelector(activeRole) {
+    if (!roleSelector) return;
+    const user = store.getCurrentUser();
+
+    let items = [];
+    if (!user) {
+      // Unauthenticated guest: Only Public Events and Map
+      items = [
+        { role: 'PUBLIC', label: 'События', icon: ICONS.calendar },
+        { role: 'MAP', label: 'Карта Ростова', icon: ICONS.map }
+      ];
+    } else if (user.role === 'ADMIN') {
+      items = [
+        { role: 'ADMIN', label: 'Администрирование', icon: ICONS.shield },
+        { role: 'ORGANIZER', label: 'Организатор', icon: ICONS.building },
+        { role: 'VOLUNTEER', label: 'Волонтёр', icon: ICONS.user },
+        { role: 'PUBLIC', label: 'Все события', icon: ICONS.calendar },
+        { role: 'MAP', label: 'Карта', icon: ICONS.map }
+      ];
+    } else if (user.role === 'ORGANIZER') {
+      items = [
+        { role: 'ORGANIZER', label: 'Мои события', icon: ICONS.building },
+        { role: 'PUBLIC', label: 'Все события', icon: ICONS.calendar },
+        { role: 'MAP', label: 'Карта', icon: ICONS.map }
+      ];
+    } else { // VOLUNTEER
+      items = [
+        { role: 'VOLUNTEER', label: 'Мой кабинет', icon: ICONS.user },
+        { role: 'PUBLIC', label: 'События', icon: ICONS.calendar },
+        { role: 'MAP', label: 'Карта', icon: ICONS.map }
+      ];
+    }
+
+    roleSelector.innerHTML = items.map(item => `
+      <button class="role-btn ${item.role === activeRole ? 'active' : ''}" data-role="${item.role}">
+        ${item.icon}
+        <span>${item.label}</span>
+      </button>
+    `).join('');
+
+    roleSelector.querySelectorAll('.role-btn').forEach(btn => {
+      btn.addEventListener('click', () => setRole(btn.dataset.role));
+    });
+  }
+
   function setRole(role) {
+    const user = store.getCurrentUser();
+
+    // Guard: guests can only access PUBLIC and MAP
+    if (!user && role !== 'PUBLIC' && role !== 'MAP') {
+      showToast('Для доступа к кабинету необходимо авторизоваться', 'info');
+      modalLogin.classList.add('open');
+      role = 'PUBLIC';
+    }
+
     store.setCurrentRole(role === 'MAP' ? store.getCurrentRole() : role);
 
-    roleButtons.forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.role === role);
-    });
+    renderRoleSelector(role);
 
+    if (viewPublic) viewPublic.style.display = role === 'PUBLIC' ? 'block' : 'none';
     viewAdmin.style.display = role === 'ADMIN' ? 'block' : 'none';
     viewOrganizer.style.display = role === 'ORGANIZER' ? 'block' : 'none';
     viewVolunteer.style.display = role === 'VOLUNTEER' ? 'block' : 'none';
@@ -70,19 +142,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (role === 'MAP') {
       renderMapView();
+    } else if (role === 'PUBLIC') {
+      renderPublicEventsView();
     } else {
       renderCurrentRoleView();
     }
   }
 
   function updateContextBanner(role) {
-    document.getElementById('contextBanner').style.display = 'flex';
+    const banner = document.getElementById('contextBanner');
+    if (!banner) return;
+
+    // In PUBLIC mode, hero banner is displayed in viewPublic, so contextBanner is hidden
+    if (role === 'PUBLIC') {
+      banner.style.display = 'none';
+      return;
+    }
+
+    banner.style.display = 'flex';
 
     if (role === 'ADMIN') {
       bannerTitle.textContent = 'Рабочее место администратора';
       bannerDesc.textContent = 'Регистрация организаторов и волонтёров, согласование и отмена событий';
       contextControls.innerHTML = `
-        <span style="font-size: 0.85rem; color: #94a3b8;">Полномочия: Главный координатор</span>
+        <span style="font-size: 0.85rem; color: #94a3b8; display: flex; align-items: center; gap: 0.4rem;">
+          ${ICONS.shield} Главный координатор ВЦ ДГТУ
+        </span>
       `;
     } else if (role === 'ORGANIZER') {
       bannerTitle.textContent = 'Личный кабинет организатора событий';
@@ -95,16 +180,19 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="context-selector">
           <label for="selectActiveOrg">Организация:</label>
           <select id="selectActiveOrg">
-            ${orgs.map(o => `<option value="${o.id}" ${o.id === currentOrg.id ? 'selected' : ''}>${o.name}</option>`).join('')}
+            ${orgs.map(o => `<option value="${o.id}" ${currentOrg && o.id === currentOrg.id ? 'selected' : ''}>${o.name}</option>`).join('')}
           </select>
         </div>
       `;
 
-      document.getElementById('selectActiveOrg').addEventListener('change', (e) => {
-        store.setActiveOrg(e.target.value);
-        showToast(`Выбрана организация: ${store.getActiveOrg().name}`);
-        renderOrganizerView();
-      });
+      const selectOrgEl = document.getElementById('selectActiveOrg');
+      if (selectOrgEl) {
+        selectOrgEl.addEventListener('change', (e) => {
+          store.setActiveOrg(e.target.value);
+          showToast(`Выбрана организация: ${store.getActiveOrg().name}`);
+          renderOrganizerView();
+        });
+      }
     } else if (role === 'VOLUNTEER') {
       bannerTitle.textContent = 'Рабочее место волонтёра';
       bannerDesc.textContent = 'Поиск событий, подача заявок и выписка подтверждённых часов';
@@ -116,16 +204,19 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="context-selector">
           <label for="selectActiveVol">Профиль:</label>
           <select id="selectActiveVol">
-            ${vols.map(v => `<option value="${v.id}" ${v.id === currentVol.id ? 'selected' : ''}>${v.fullName}</option>`).join('')}
+            ${vols.map(v => `<option value="${v.id}" ${currentVol && v.id === currentVol.id ? 'selected' : ''}>${v.fullName}</option>`).join('')}
           </select>
         </div>
       `;
 
-      document.getElementById('selectActiveVol').addEventListener('change', (e) => {
-        store.setActiveVolunteer(e.target.value);
-        showToast(`Выбран волонтёр: ${store.getActiveVolunteer().fullName}`);
-        renderVolunteerView();
-      });
+      const selectVolEl = document.getElementById('selectActiveVol');
+      if (selectVolEl) {
+        selectVolEl.addEventListener('change', (e) => {
+          store.setActiveVolunteer(e.target.value);
+          showToast(`Выбран волонтёр: ${store.getActiveVolunteer().fullName}`);
+          renderVolunteerView();
+        });
+      }
     } else if (role === 'MAP') {
       bannerTitle.textContent = 'Интерактивная карта волонтёров и поисков';
       bannerDesc.textContent = 'Координация поисково-спасательных операций (ПСО) и точек помощи в г. Ростов-на-Дону';
@@ -137,10 +228,6 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
     }
   }
-
-  roleButtons.forEach(btn => {
-    btn.addEventListener('click', () => setRole(btn.dataset.role));
-  });
 
   // Tab switching within each view
   document.querySelectorAll('.tab-navigation .tab-btn').forEach(btn => {
@@ -157,15 +244,160 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Reset Data Handler
-  btnResetData.addEventListener('click', () => {
-    if (confirm('Сбросить данные к исходному демонстрационному состоянию?')) {
-      store.reset();
-      showToast('Демонстрационные данные успешно сброшены!');
-      renderCurrentRoleView();
-      updateContextBanner(store.getCurrentRole());
+  // Hero Section Buttons
+  const btnHeroRegister = document.getElementById('btnHeroRegister');
+  if (btnHeroRegister) {
+    btnHeroRegister.addEventListener('click', () => {
+      modalRegister.classList.add('open');
+    });
+  }
+  const btnHeroLogin = document.getElementById('btnHeroLogin');
+  if (btnHeroLogin) {
+    btnHeroLogin.addEventListener('click', () => {
+      modalLogin.classList.add('open');
+    });
+  }
+
+  // Public Search Filter
+  const publicSearchInput = document.getElementById('publicSearchInput');
+  if (publicSearchInput) {
+    publicSearchInput.addEventListener('input', () => {
+      renderPublicEventsView();
+    });
+  }
+
+  // ==========================================
+  // 2.1 PUBLIC EVENTS VIEW IMPLEMENTATION
+  // ==========================================
+  function renderPublicEventsView() {
+    const container = document.getElementById('publicEventsList');
+    if (!container) return;
+
+    const allEvents = store.getEvents();
+    const acceptedEvents = allEvents.filter(e => e.status === 'ACCEPTED');
+    const user = store.getCurrentUser();
+    const volunteer = user && user.role === 'VOLUNTEER' ? store.getActiveVolunteer() : null;
+    const myRequests = volunteer ? store.getRequests().filter(r => r.volonteerId === volunteer.id) : [];
+
+    // Hero stats
+    const statEventsEl = document.getElementById('publicStatEvents');
+    if (statEventsEl) statEventsEl.textContent = acceptedEvents.length;
+    const statHoursEl = document.getElementById('publicStatHours');
+    if (statHoursEl) {
+      const totalHours = acceptedEvents.reduce((acc, cur) => acc + (cur.plannedHours || 0), 0);
+      statHoursEl.textContent = `${totalHours}+ ч`;
     }
-  });
+
+    const searchQuery = (publicSearchInput ? publicSearchInput.value : '').toLowerCase().trim();
+    const filteredEvents = acceptedEvents.filter(e =>
+      e.title.toLowerCase().includes(searchQuery) ||
+      e.description.toLowerCase().includes(searchQuery) ||
+      e.location.toLowerCase().includes(searchQuery) ||
+      e.organizationName.toLowerCase().includes(searchQuery)
+    );
+
+    const countBadge = document.getElementById('publicEventsCount');
+    if (countBadge) {
+      countBadge.textContent = `${filteredEvents.length} доступных событий`;
+    }
+
+    if (filteredEvents.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state" style="grid-column: 1 / -1;">
+          <div class="empty-state-icon">${ICONS.search}</div>
+          <h4>Событий не найдено</h4>
+          <p>Попробуйте изменить поисковый запрос или загляните позже.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = filteredEvents.map(evt => {
+      let actionBtnHtml = '';
+      if (!user) {
+        actionBtnHtml = `
+          <button class="btn btn-primary btn-sm btn-guest-apply" data-id="${evt.id}">
+            Подать заявку
+          </button>
+        `;
+      } else if (user.role === 'VOLUNTEER') {
+        const existingReq = myRequests.find(r => r.eventId === evt.id);
+        if (!existingReq) {
+          actionBtnHtml = `
+            <button class="btn btn-primary btn-sm btn-vol-apply" data-id="${evt.id}">
+              Подать заявку
+            </button>
+          `;
+        } else {
+          let reqBadge = 'badge-pending';
+          let reqText = 'Заявка на рассмотрении';
+          if (existingReq.status === 'ACCEPTED') { reqBadge = 'badge-accepted'; reqText = 'Вы приняты!'; }
+          else if (existingReq.status === 'CONFIRMED') { reqBadge = 'badge-confirmed'; reqText = `Часы: ${existingReq.confirmedHours} ч`; }
+          else if (existingReq.status === 'CANCELLED') { reqBadge = 'badge-cancelled'; reqText = 'Отклонена'; }
+          actionBtnHtml = `<span class="badge ${reqBadge}">${reqText}</span>`;
+        }
+      } else {
+        actionBtnHtml = `<span class="badge badge-accepted">Активно</span>`;
+      }
+
+      return `
+        <div class="event-card">
+          <div>
+            <div class="event-header">
+              <span class="badge badge-accepted">Набор открыт</span>
+              <span style="font-size: 0.8rem; color: #64748b; display: flex; align-items: center; gap: 0.25rem;">
+                ${ICONS.calendar} ${evt.startDate}
+              </span>
+            </div>
+            <div class="event-title">${evt.title}</div>
+            <div class="event-org" style="display: flex; align-items: center; gap: 0.35rem;">
+              ${ICONS.building} ${evt.organizationName}
+            </div>
+            <div class="event-desc">${evt.description}</div>
+            <div class="event-meta">
+              <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                ${ICONS.mapPin} ${evt.location}
+              </div>
+              <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                ${ICONS.clock} Опыт: <strong>+${evt.plannedHours} ч</strong>
+              </div>
+              <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                ${ICONS.users} Требуется: <strong>${evt.requiredVolunteers} чел.</strong>
+              </div>
+            </div>
+          </div>
+          <div class="event-footer">
+            <span style="font-size: 0.8rem; color: #64748b; display: flex; align-items: center; gap: 0.25rem;">
+              ${ICONS.check} Одобрено: ${evt.approvedVolunteersCount || 0}
+            </span>
+            ${actionBtnHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Guest apply click → modal login
+    container.querySelectorAll('.btn-guest-apply').forEach(btn => {
+      btn.addEventListener('click', () => {
+        showToast('Для подачи заявки необходимо войти в систему или зарегистрироваться', 'info');
+        modalLogin.classList.add('open');
+      });
+    });
+
+    // Volunteer apply click
+    container.querySelectorAll('.btn-vol-apply').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!volunteer) return;
+        const res = store.submitRequest(volunteer.id, btn.dataset.id);
+        if (res.success) {
+          showToast('Заявка на участие успешно отправлена организатору!');
+          renderPublicEventsView();
+        } else {
+          showToast(res.message, 'error');
+        }
+      });
+    });
+  }
 
   function renderCurrentRoleView() {
     const role = store.getCurrentRole();
@@ -206,15 +438,25 @@ document.addEventListener('DOMContentLoaded', () => {
           <div>
             <div class="event-header">
               <span class="badge badge-created">Ожидает модерации</span>
-              <span style="font-size: 0.8rem; color: #64748b;">${evt.startDate}</span>
+              <span style="font-size: 0.8rem; color: #64748b; display: flex; align-items: center; gap: 0.25rem;">
+                ${ICONS.calendar} ${evt.startDate}
+              </span>
             </div>
             <div class="event-title">${evt.title}</div>
-            <div class="event-org">🏢 ${evt.organizationName}</div>
+            <div class="event-org" style="display: flex; align-items: center; gap: 0.35rem;">
+              ${ICONS.building} ${evt.organizationName}
+            </div>
             <div class="event-desc">${evt.description}</div>
             <div class="event-meta">
-              <div class="event-meta-item">📍 ${evt.location}</div>
-              <div class="event-meta-item">⏱️ Плановые часы: <strong>${evt.plannedHours} ч</strong></div>
-              <div class="event-meta-item">👥 Требуется волонтёров: <strong>${evt.requiredVolunteers} чел.</strong></div>
+              <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                ${ICONS.mapPin} ${evt.location}
+              </div>
+              <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                ${ICONS.clock} Плановые часы: <strong>${evt.plannedHours} ч</strong>
+              </div>
+              <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                ${ICONS.users} Требуется: <strong>${evt.requiredVolunteers} чел.</strong>
+              </div>
             </div>
           </div>
           <div class="event-footer">
@@ -222,7 +464,7 @@ document.addEventListener('DOMContentLoaded', () => {
               ✕ Отклонить
             </button>
             <button class="btn btn-accent btn-sm btn-accept-event" data-id="${evt.id}">
-              ✓ Согласовать событие
+              ✓ Согласовать
             </button>
           </div>
         </div>
@@ -350,21 +592,29 @@ document.addEventListener('DOMContentLoaded', () => {
             <div>
               <div class="event-header">
                 <span class="badge ${badgeClass}">${badgeText}</span>
-                <span style="font-size: 0.8rem; color: #64748b;">${evt.startDate}</span>
+                <span style="font-size: 0.8rem; color: #64748b; display: flex; align-items: center; gap: 0.25rem;">
+                  ${ICONS.calendar} ${evt.startDate}
+                </span>
               </div>
               <div class="event-title">${evt.title}</div>
               <div class="event-desc">${evt.description}</div>
               <div class="event-meta">
-                <div class="event-meta-item">📍 ${evt.location}</div>
-                <div class="event-meta-item">👥 Набрано волонтёров: <strong>${evt.approvedVolunteersCount} / ${evt.requiredVolunteers}</strong></div>
-                <div class="event-meta-item">⏱️ Длительность: <strong>${evt.plannedHours} ч</strong></div>
+                <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                  ${ICONS.mapPin} ${evt.location}
+                </div>
+                <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                  ${ICONS.users} Набрано: <strong>${evt.approvedVolunteersCount} / ${evt.requiredVolunteers}</strong>
+                </div>
+                <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                  ${ICONS.clock} Длительность: <strong>${evt.plannedHours} ч</strong>
+                </div>
               </div>
             </div>
             <div class="event-footer">
               <span style="font-size: 0.8rem; color: #64748b;">Заявок: ${evt.requestsCount}</span>
               ${evt.status === 'ACCEPTED' ? `
                 <button class="btn btn-outline btn-sm btn-close-event" data-id="${evt.id}">
-                  🔒 Закрыть событие (CLOSED)
+                  Закрыть событие
                 </button>
               ` : evt.status === 'CLOSED' ? `
                 <span style="font-size: 0.8rem; color: #047857; font-weight: 600;">✓ Завершено</span>
@@ -594,19 +844,31 @@ document.addEventListener('DOMContentLoaded', () => {
             <div>
               <div class="event-header">
                 <span class="badge badge-accepted">Набор открыт</span>
-                <span style="font-size: 0.8rem; color: #64748b;">${evt.startDate}</span>
+                <span style="font-size: 0.8rem; color: #64748b; display: flex; align-items: center; gap: 0.25rem;">
+                  ${ICONS.calendar} ${evt.startDate}
+                </span>
               </div>
               <div class="event-title">${evt.title}</div>
-              <div class="event-org">🏢 ${evt.organizationName}</div>
+              <div class="event-org" style="display: flex; align-items: center; gap: 0.35rem;">
+                ${ICONS.building} ${evt.organizationName}
+              </div>
               <div class="event-desc">${evt.description}</div>
               <div class="event-meta">
-                <div class="event-meta-item">📍 ${evt.location}</div>
-                <div class="event-meta-item">⏱️ Опыт: <strong>+${evt.plannedHours} часов</strong></div>
-                <div class="event-meta-item">👥 Требуется волонтёров: <strong>${evt.requiredVolunteers} чел.</strong></div>
+                <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                  ${ICONS.mapPin} ${evt.location}
+                </div>
+                <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                  ${ICONS.clock} Опыт: <strong>+${evt.plannedHours} ч</strong>
+                </div>
+                <div class="event-meta-item" style="display: flex; align-items: center; gap: 0.35rem;">
+                  ${ICONS.users} Требуется: <strong>${evt.requiredVolunteers} чел.</strong>
+                </div>
               </div>
             </div>
             <div class="event-footer">
-              <span style="font-size: 0.8rem; color: #64748b;">Одобрено: ${evt.approvedVolunteersCount}</span>
+              <span style="font-size: 0.8rem; color: #64748b; display: flex; align-items: center; gap: 0.25rem;">
+                ${ICONS.check} Одобрено: ${evt.approvedVolunteersCount || 0}
+              </span>
               ${actionButtonHtml}
             </div>
           </div>
@@ -777,6 +1039,11 @@ document.addEventListener('DOMContentLoaded', () => {
         mapMarkerLayer = L.layerGroup().addTo(leafletMap);
 
         leafletMap.on('click', (e) => {
+          if (!store.getCurrentUser()) {
+            showToast('Для добавления меток на карту необходимо авторизоваться', 'info');
+            modalLogin.classList.add('open');
+            return;
+          }
           const latInput = document.getElementById('markerLat');
           const lngInput = document.getElementById('markerLng');
           if (latInput && lngInput) {
@@ -785,7 +1052,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           if (!modalAddMarker.classList.contains('open')) {
             modalAddMarker.classList.add('open');
-            showToast('📍 Координаты установлены! Заполните остальные поля метки.', 'info');
+            showToast('Координаты установлены! Заполните остальные поля метки.', 'info');
           }
         });
         return;
@@ -895,6 +1162,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Если кликнули по самой метке, не открываем модалку создания
         if (e.target.closest('.svg-marker-node')) return;
 
+        if (!store.getCurrentUser()) {
+          showToast('Для добавления меток на карту необходимо авторизоваться', 'info');
+          modalLogin.classList.add('open');
+          return;
+        }
+
         const rect = svg.getBoundingClientRect();
         const clickX = ((e.clientX - rect.left) / rect.width) * 900;
         const clickY = ((e.clientY - rect.top) / rect.height) * 550;
@@ -913,7 +1186,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!modalAddMarker.classList.contains('open')) {
           modalAddMarker.classList.add('open');
-          showToast('📍 Координаты установлены на карте! Заполните данные метки.', 'info');
+          showToast('Координаты установлены на карте! Заполните данные метки.', 'info');
         }
       });
     }
@@ -1256,6 +1529,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Add Marker Modal
   btnOpenAddMarkerModal.addEventListener('click', () => {
+    if (!store.getCurrentUser()) {
+      showToast('Для добавления меток на карту необходимо авторизоваться', 'info');
+      modalLogin.classList.add('open');
+      return;
+    }
     modalAddMarker.classList.add('open');
   });
 
@@ -1330,9 +1608,15 @@ document.addEventListener('DOMContentLoaded', () => {
           <span>${user.lastName} ${user.firstName.charAt(0)}.</span>
           <span class="badge ${roleBadgeClass}" style="font-size: 0.65rem;">${roleText}</span>
         </div>
-        <button class="btn-secondary-sm" id="btnHeaderProfile">👤 Кабинет</button>
-        <button class="btn-secondary-sm" id="btnLogout" title="Выйти из учётной записи">🚪 Выйти</button>
-        <button class="btn-secondary-sm" id="btnResetData" title="Сбросить к исходным демонстрационным данным">🔄 Сброс демо</button>
+        <button class="btn-secondary-sm" id="btnHeaderProfile">
+          ${ICONS.user} <span>Кабинет</span>
+        </button>
+        <button class="btn-secondary-sm" id="btnLogout" title="Выйти из учётной записи">
+          ${ICONS.logout} <span>Выйти</span>
+        </button>
+        <button class="btn-secondary-sm" id="btnResetData" title="Сбросить к исходным демонстрационным данным">
+          🔄 <span>Сброс</span>
+        </button>
       `;
 
       document.getElementById('btnUserChip').addEventListener('click', openProfileModal);
@@ -1341,12 +1625,19 @@ document.addEventListener('DOMContentLoaded', () => {
         store.logout();
         showToast('Вы вышли из учётной записи', 'info');
         renderAuthHeader();
+        setRole('PUBLIC');
       });
     } else {
       authHeaderArea.innerHTML = `
-        <button class="btn btn-primary btn-sm" id="btnOpenLogin">🔐 Войти</button>
-        <button class="btn btn-accent btn-sm" id="btnOpenRegister">📝 Регистрация</button>
-        <button class="btn-secondary-sm" id="btnResetData" title="Сбросить к исходным демонстрационным данным">🔄 Сброс демо</button>
+        <button class="btn btn-primary btn-sm" id="btnOpenLogin">
+          ${ICONS.lock} <span>Войти</span>
+        </button>
+        <button class="btn btn-accent btn-sm" id="btnOpenRegister">
+          ${ICONS.plus} <span>Регистрация</span>
+        </button>
+        <button class="btn-secondary-sm" id="btnResetData" title="Сбросить к исходным демонстрационным данным">
+          🔄 <span>Сброс</span>
+        </button>
       `;
 
       document.getElementById('btnOpenLogin').addEventListener('click', () => {
@@ -1368,6 +1659,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     }
+
+    renderRoleSelector(store.getCurrentRole());
   }
 
   function openProfileModal() {

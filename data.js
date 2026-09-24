@@ -57,10 +57,10 @@ function decodeJWT(token) {
 }
 
 const INITIAL_DATA = {
-  currentUserRole: 'ADMIN', // ADMIN | ORGANIZER | VOLUNTEER
+  currentUserRole: 'PUBLIC', // PUBLIC | ADMIN | ORGANIZER | VOLUNTEER
   activeVolunteerId: 'vol-1',
   activeOrgId: 'org-1',
-  currentUserId: 'usr-admin-1',
+  currentUserId: null, // Не авторизован по умолчанию
   jwtToken: null,
 
   // Пользователи системы с учетными записями
@@ -373,22 +373,9 @@ class DataStore {
           updated = true;
         }
 
-        // Обратная совместимость: пользователи и JWT
+        // Обратная совместимость: пользователи
         if (!parsed.users || parsed.users.length === 0) {
           parsed.users = JSON.parse(JSON.stringify(INITIAL_DATA.users));
-          parsed.currentUserId = INITIAL_DATA.currentUserId;
-          updated = true;
-        }
-
-        if (!parsed.jwtToken) {
-          const defaultUser = parsed.users[0];
-          parsed.jwtToken = generateJWT({
-            sub: defaultUser.id,
-            email: defaultUser.email,
-            role: defaultUser.role,
-            firstName: defaultUser.firstName,
-            lastName: defaultUser.lastName
-          });
           updated = true;
         }
 
@@ -402,13 +389,6 @@ class DataStore {
     }
     
     const fresh = JSON.parse(JSON.stringify(INITIAL_DATA));
-    fresh.jwtToken = generateJWT({
-      sub: fresh.users[0].id,
-      email: fresh.users[0].email,
-      role: fresh.users[0].role,
-      firstName: fresh.users[0].firstName,
-      lastName: fresh.users[0].lastName
-    });
     this.save(fresh);
     return fresh;
   }
@@ -424,13 +404,6 @@ class DataStore {
   reset() {
     localStorage.removeItem(STORAGE_KEY);
     this.data = JSON.parse(JSON.stringify(INITIAL_DATA));
-    this.data.jwtToken = generateJWT({
-      sub: this.data.users[0].id,
-      email: this.data.users[0].email,
-      role: this.data.users[0].role,
-      firstName: this.data.users[0].firstName,
-      lastName: this.data.users[0].lastName
-    });
     this.save();
     return this.data;
   }
@@ -549,6 +522,7 @@ class DataStore {
   logout() {
     this.data.currentUserId = null;
     this.data.jwtToken = null;
+    this.data.currentUserRole = 'PUBLIC';
     this.save();
   }
 
