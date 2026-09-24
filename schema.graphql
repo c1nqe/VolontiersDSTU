@@ -1,0 +1,172 @@
+"""
+Схема GraphQL для сервиса «Волонтеры» (DataSpace Community Edition)
+Хакатон ВЕСНА '25 | ДГТУ
+"""
+
+enum EventStatus {
+  CREATED     # Создано организатором, ожидает модерации администратора
+  ACCEPTED    # Согласовано администратором, доступно для волонтеров
+  CANCELLED   # Отклонено администратором или отменено организатором
+  CLOSED      # Завершено организатором после проведения
+}
+
+enum RequestStatus {
+  PENDING     # Заявка подана волонтером, ожидает решения организатора
+  ACCEPTED    # Заявка согласована организатором
+  CANCELLED   # Заявка отклонена организатором или отменена волонтером
+  CONFIRMED   # Факт работы подтвержден организатором с начислением часов
+}
+
+type Organization {
+  id: ID!
+  name: String!
+  inn: String
+  contactPerson: String!
+  email: String!
+  phone: String!
+  description: String
+  createdAt: String!
+  events: [Event!]
+}
+
+type Volonteer {
+  id: ID!
+  fullName: String!
+  email: String!
+  phone: String!
+  birthDate: String
+  studentId: String
+  faculty: String
+  totalConfirmedHours: Float!
+  createdAt: String!
+  requests: [VolonteerEventRequest!]
+}
+
+type Event {
+  id: ID!
+  title: String!
+  description: String!
+  location: String!
+  startDate: String!
+  endDate: String!
+  requiredVolunteers: Int!
+  plannedHours: Float!
+  status: EventStatus!
+  organizationId: ID!
+  organization: Organization!
+  requests: [VolonteerEventRequest!]
+  createdAt: String!
+}
+
+type VolonteerEventRequest {
+  id: ID!
+  volonteerId: ID!
+  volonteer: Volonteer!
+  eventId: ID!
+  event: Event!
+  status: RequestStatus!
+  requestedHours: Float!
+  confirmedHours: Float
+  rejectionReason: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type StatementReport {
+  volonteer: Volonteer!
+  startDate: String!
+  endDate: String!
+  totalHours: Float!
+  closedEventsCount: Int!
+  items: [StatementReportItem!]!
+}
+
+type StatementReportItem {
+  eventName: String!
+  organizationName: String!
+  eventDate: String!
+  confirmedHours: Float!
+}
+
+# Queries
+type Query {
+  organizations: [Organization!]!
+  organization(id: ID!): Organization
+
+  volonteers: [Volonteer!]!
+  volonteer(id: ID!): Volonteer
+
+  events(status: EventStatus): [Event!]!
+  event(id: ID!): Event
+  availableEvents: [Event!]! # Event = ACCEPTED
+
+  requests(volonteerId: ID, eventId: ID, status: RequestStatus): [VolonteerEventRequest!]!
+  request(id: ID!): VolonteerEventRequest
+
+  # Выписка об отработанных часах на закрытых событиях (CONFIRMED) за период
+  volonteerStatement(volonteerId: ID!, startDate: String!, endDate: String!): StatementReport!
+}
+
+# Mutations
+type Mutation {
+  # Администратор
+  registerOrganization(
+    name: String!
+    contactPerson: String!
+    email: String!
+    phone: String!
+    inn: String
+    description: String
+  ): Organization!
+
+  registerVolonteer(
+    fullName: String!
+    email: String!
+    phone: String!
+    studentId: String
+    faculty: String
+    birthDate: String
+  ): Volonteer!
+
+  moderateEvent(
+    eventId: ID!
+    status: EventStatus! # ACCEPTED | CANCELLED
+  ): Event!
+
+  # Организатор
+  createEvent(
+    title: String!
+    description: String!
+    location: String!
+    startDate: String!
+    endDate: String!
+    requiredVolunteers: Int!
+    plannedHours: Float!
+    organizationId: ID!
+  ): Event!
+
+  moderateRequest(
+    requestId: ID!
+    status: RequestStatus! # ACCEPTED | CANCELLED
+    rejectionReason: String
+  ): VolonteerEventRequest!
+
+  confirmVolunteerWork(
+    requestId: ID!
+    confirmedHours: Float!
+  ): VolonteerEventRequest!
+
+  closeEvent(
+    eventId: ID!
+  ): Event!
+
+  # Волонтёр
+  submitEventRequest(
+    volonteerId: ID!
+    eventId: ID!
+  ): VolonteerEventRequest!
+
+  cancelEventRequest(
+    requestId: ID!
+  ): VolonteerEventRequest!
+}

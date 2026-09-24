@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Сервис «Волонтёры» | Хакатон ВЕСНА '25 (ДГТУ)</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Top App Header -->
+  <header class="app-header no-print">
+    <div class="header-container">
+      <div class="brand">
+        <div class="brand-icon">В</div>
+        <div class="brand-text">
+          <h1>Сервис «Волонтёры»</h1>
+          <span class="brand-badge">ДГТУ • Хакатон ВЕСНА '25</span>
+        </div>
+      </div>
+
+      <!-- Quick Role Switcher -->
+      <div class="role-bar" id="roleSelector">
+        <button class="role-btn active" data-role="ADMIN">
+          <span>🔑</span> Администратор
+        </button>
+        <button class="role-btn" data-role="ORGANIZER">
+          <span>🏢</span> Организатор
+        </button>
+        <button class="role-btn" data-role="VOLUNTEER">
+          <span>🙋</span> Волонтёр
+        </button>
+      </div>
+
+      <div class="header-actions">
+        <button class="btn-secondary-sm" id="btnResetData" title="Сбросить к исходным демонстрационным данным">
+          🔄 Сброс демо-данных
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="main-content">
+
+    <!-- Dynamic Context Banner -->
+    <section class="context-banner no-print" id="contextBanner">
+      <div class="context-info">
+        <h2 id="bannerTitle">Рабочее место администратора</h2>
+        <p id="bannerDesc">Управление организаторами, волонтерами и модерация событий</p>
+      </div>
+      <div class="context-controls" id="contextControls">
+        <!-- Will be filled dynamically by current role -->
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- 1. РАБОЧЕЕ МЕСТО АДМИНИСТРАТОРА (ADMIN)   -->
+    <!-- ========================================== -->
+    <div id="viewAdmin" class="role-view">
+      <!-- Admin Stats -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-label">Организаций</span>
+          <span class="stat-val" id="adminStatOrgs">0</span>
+          <span class="stat-sub">Зарегистрировано в системе</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Волонтёров</span>
+          <span class="stat-val" id="adminStatVols">0</span>
+          <span class="stat-sub">Студентов ДГТУ в базе</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Ожидают модерации</span>
+          <span class="stat-val" id="adminStatPendingEvents" style="color: var(--warning);">0</span>
+          <span class="stat-sub">События со статусом CREATED</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Всего событий</span>
+          <span class="stat-val" id="adminStatTotalEvents">0</span>
+          <span class="stat-sub">Одобрено, закрыто или отменено</span>
+        </div>
+      </div>
+
+      <!-- Admin Tabs Navigation -->
+      <div class="tab-navigation no-print">
+        <button class="tab-btn active" data-tab="admin-tab-moderation">🛡️ Модерация событий</button>
+        <button class="tab-btn" data-tab="admin-tab-reg-org">🏢 Регистрация организатора</button>
+        <button class="tab-btn" data-tab="admin-tab-reg-vol">🙋 Регистрация волонтёра</button>
+        <button class="tab-btn" data-tab="admin-tab-registry">📋 Общий реестр</button>
+      </div>
+
+      <!-- Admin Tab: Модерация событий -->
+      <div id="admin-tab-moderation" class="tab-pane active">
+        <div class="toolbar no-print">
+          <h3>Заявки на проведение событий (статус: CREATED)</h3>
+          <span class="badge badge-created" id="adminPendingBadge">0 на рассмотрении</span>
+        </div>
+        <div id="adminModerationList" class="cards-grid">
+          <!-- Filled by JS -->
+        </div>
+      </div>
+
+      <!-- Admin Tab: Регистрация Организатора -->
+      <div id="admin-tab-reg-org" class="tab-pane">
+        <div class="form-card">
+          <h3 style="margin-bottom: 1.25rem;">Регистрация новой организации (Organization)</h3>
+          <form id="formRegisterOrg">
+            <div class="form-group">
+              <label class="form-label">Наименование организации / центра *</label>
+              <input type="text" class="form-input" id="orgName" required placeholder="Например: Волонтёрский отряд Факультета ИВТ">
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Контактное лицо *</label>
+                <input type="text" class="form-input" id="orgContact" required placeholder="ФИО координатора">
+              </div>
+              <div class="form-group">
+                <label class="form-label">ИНН / ОГРН</label>
+                <input type="text" class="form-input" id="orgInn" placeholder="6165033140">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Email для связи *</label>
+                <input type="email" class="form-input" id="orgEmail" required placeholder="volunteers@donstu.ru">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Телефон *</label>
+                <input type="tel" class="form-input" id="orgPhone" required placeholder="+7 (863) 273-84-00">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Краткое описание деятельности</label>
+              <textarea class="form-textarea" id="orgDesc" placeholder="Направления работы, аудитория, ключевые проекты..."></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Зарегистрировать организатора</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Admin Tab: Регистрация Волонтёра -->
+      <div id="admin-tab-reg-vol" class="tab-pane">
+        <div class="form-card">
+          <h3 style="margin-bottom: 1.25rem;">Регистрация нового волонтёра (Volonteer)</h3>
+          <form id="formRegisterVol">
+            <div class="form-group">
+              <label class="form-label">ФИО волонтёра полностью *</label>
+              <input type="text" class="form-input" id="volFullName" required placeholder="Николаев Максим Сергеевич">
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Номер студенческого билета</label>
+                <input type="text" class="form-input" id="volStudentId" placeholder="СТ-2024-5510">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Факультет / Институт ДГТУ *</label>
+                <input type="text" class="form-input" id="volFaculty" required placeholder="Информатика и ВТ">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Email *</label>
+                <input type="email" class="form-input" id="volEmail" required placeholder="m.nikolaev@edu.donstu.ru">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Телефон *</label>
+                <input type="tel" class="form-input" id="volPhone" required placeholder="+7 (999) 000-11-22">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Дата рождения</label>
+              <input type="date" class="form-input" id="volBirthDate">
+            </div>
+            <button type="submit" class="btn btn-accent">Зарегистрировать волонтёра</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Admin Tab: Общий реестр -->
+      <div id="admin-tab-registry" class="tab-pane">
+        <h3 style="margin-bottom: 1rem;">Организаторы в системе</h3>
+        <div class="table-container" style="margin-bottom: 2rem;">
+          <table class="data-table" id="adminTableOrgs">
+            <thead>
+              <tr>
+                <th>Организация</th>
+                <th>Контактное лицо</th>
+                <th>Контакты</th>
+                <th>ИНН</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-bottom: 1rem;">Волонтёры в системе</h3>
+        <div class="table-container">
+          <table class="data-table" id="adminTableVols">
+            <thead>
+              <tr>
+                <th>ФИО</th>
+                <th>Студ. билет</th>
+                <th>Факультет</th>
+                <th>Контакты</th>
+                <th>Подтвержденные часы</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ========================================== -->
+    <!-- 2. КАБИНЕТ ОРГАНИЗАТОРА (ORGANIZER)       -->
+    <!-- ========================================== -->
+    <div id="viewOrganizer" class="role-view" style="display: none;">
+      <!-- Organizer Stats -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-label">Мои события</span>
+          <span class="stat-val" id="orgStatEvents">0</span>
+          <span class="stat-sub">Создано организацией</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Входящие заявки</span>
+          <span class="stat-val" id="orgStatPendingRequests" style="color: var(--warning);">0</span>
+          <span class="stat-sub">Ожидают вашего решения</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Одобрено волонтеров</span>
+          <span class="stat-val" id="orgStatApprovedRequests">0</span>
+          <span class="stat-sub">Готовы к работе</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Подтверждено часов</span>
+          <span class="stat-val" id="orgStatConfirmedHours" style="color: var(--accent);">0 ч</span>
+          <span class="stat-sub">Зачислено в книжки</span>
+        </div>
+      </div>
+
+      <!-- Action Toolbar -->
+      <div class="toolbar no-print">
+        <div class="tab-navigation" style="margin-bottom: 0; border-bottom: none;">
+          <button class="tab-btn active" data-tab="org-tab-events">📅 Мои события</button>
+          <button class="tab-btn" data-tab="org-tab-requests">📥 Заявки волонтёров</button>
+          <button class="tab-btn" data-tab="org-tab-confirm">⏱️ Подтверждение часов</button>
+        </div>
+        <button class="btn btn-primary" id="btnOpenCreateEventModal">
+          ➕ Создать событие
+        </button>
+      </div>
+
+      <!-- Org Tab: Мои события -->
+      <div id="org-tab-events" class="tab-pane active">
+        <div id="orgEventsList" class="cards-grid">
+          <!-- Filled by JS -->
+        </div>
+      </div>
+
+      <!-- Org Tab: Заявки волонтёров -->
+      <div id="org-tab-requests" class="tab-pane">
+        <div class="table-container">
+          <table class="data-table" id="orgRequestsTable">
+            <thead>
+              <tr>
+                <th>Событие</th>
+                <th>Волонтёр</th>
+                <th>Факультет</th>
+                <th>Дата подачи</th>
+                <th>Статус заявки</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Org Tab: Подтверждение часов -->
+      <div id="org-tab-confirm" class="tab-pane">
+        <div class="toolbar">
+          <p style="color: var(--slate-600); font-size: 0.9rem;">
+            Здесь отображаются принятые волонтеры (статус <strong>ACCEPTED</strong>). Подтвердите факт их работы по итогам события, указав фактические часы.
+          </p>
+        </div>
+        <div class="table-container">
+          <table class="data-table" id="orgConfirmHoursTable">
+            <thead>
+              <tr>
+                <th>Событие</th>
+                <th>Волонтёр</th>
+                <th>Плановые часы</th>
+                <th>Статус</th>
+                <th>Подтвердить часы</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ========================================== -->
+    <!-- 3. РАБОЧЕЕ МЕСТО ВОЛОНТЁРА (VOLUNTEER)     -->
+    <!-- ========================================== -->
+    <div id="viewVolunteer" class="role-view" style="display: none;">
+      <!-- Volunteer Stats -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-label">Подтверждено часов</span>
+          <span class="stat-val" id="volStatHours" style="color: var(--accent);">0 ч</span>
+          <span class="stat-sub">Официальный стаж ДГТУ</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Мои заявки</span>
+          <span class="stat-val" id="volStatRequests">0</span>
+          <span class="stat-sub">Всего подано</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Одобренные события</span>
+          <span class="stat-val" id="volStatAccepted">0</span>
+          <span class="stat-sub">Предстоящие мероприятия</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Закрытые события</span>
+          <span class="stat-val" id="volStatClosed">0</span>
+          <span class="stat-sub">Успешно завершены</span>
+        </div>
+      </div>
+
+      <!-- Volunteer Tabs Navigation -->
+      <div class="tab-navigation no-print">
+        <button class="tab-btn active" data-tab="vol-tab-available">🌟 Доступные события</button>
+        <button class="tab-btn" data-tab="vol-tab-my-requests">📝 Мои заявки</button>
+        <button class="tab-btn" data-tab="vol-tab-statement">📜 Выписка об отработанных часах</button>
+      </div>
+
+      <!-- Vol Tab: Доступные события (Event = ACCEPTED) -->
+      <div id="vol-tab-available" class="tab-pane active">
+        <div class="toolbar no-print">
+          <div class="search-box">
+            <input type="text" class="form-input" id="volEventSearch" placeholder="🔍 Поиск событий по названию или месту...">
+          </div>
+          <span style="font-size: 0.85rem; color: var(--slate-500);">Отображаются события, прошедшие модерацию администратора</span>
+        </div>
+        <div id="volAvailableEventsList" class="cards-grid">
+          <!-- Filled by JS -->
+        </div>
+      </div>
+
+      <!-- Vol Tab: Мои заявки -->
+      <div id="vol-tab-my-requests" class="tab-pane">
+        <div class="table-container">
+          <table class="data-table" id="volRequestsTable">
+            <thead>
+              <tr>
+                <th>Событие</th>
+                <th>Организатор</th>
+                <th>Дата проведения</th>
+                <th>Часы</th>
+                <th>Статус заявки</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Vol Tab: Выписка об отработанных часах -->
+      <div id="vol-tab-statement" class="tab-pane">
+        <div class="form-card no-print" style="max-width: 100%; margin-bottom: 1.5rem;">
+          <h3 style="margin-bottom: 0.5rem;">Формирование официальной выписки</h3>
+          <p style="font-size: 0.875rem; color: var(--slate-600); margin-bottom: 1rem;">
+            В выписку включаются только завершённые закрытые мероприятия (<strong>Event = CLOSED</strong>) с подтверждённым фактом работы волонтёра (<strong>VolonteerEventRequest = CONFIRMED</strong>).
+          </p>
+          <div class="form-row" style="align-items: flex-end;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">Период: С даты</label>
+              <input type="date" class="form-input" id="statementStartDate" value="2026-09-01">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">По дату</label>
+              <input type="date" class="form-input" id="statementEndDate" value="2026-10-31">
+            </div>
+            <div class="form-group" style="margin-bottom: 0; display: flex; gap: 0.5rem;">
+              <button class="btn btn-primary" id="btnGenerateStatement">Сформировать выписку</button>
+              <button class="btn btn-outline" id="btnPrintStatement" onclick="window.print()">🖨️ Распечатать / PDF</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rendered Statement Certificate -->
+        <div id="statementContainer">
+          <!-- Filled by JS -->
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========================================== -->
+  <!-- MODAL: СОЗДАНИЕ СОБЫТИЯ (ORGANIZER)        -->
+  <!-- ========================================== -->
+  <div class="modal-overlay" id="modalCreateEvent">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Создание нового события (Event)</h3>
+        <button class="modal-close" data-close-modal>&times;</button>
+      </div>
+      <form id="formCreateEvent">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Название события *</label>
+            <input type="text" class="form-input" id="newEventTitle" required placeholder="Например: Студенческий форум ДГТУ 2026">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Описание и задачи волонтёров *</label>
+            <textarea class="form-textarea" id="newEventDesc" required placeholder="Что предстоит делать, требования к участникам, условия..."></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Место проведения *</label>
+            <input type="text" class="form-input" id="newEventLocation" required placeholder="г. Ростов-на-Дону, пл. Гагарина, 1">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Дата начала *</label>
+              <input type="date" class="form-input" id="newEventStartDate" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Дата окончания *</label>
+              <input type="date" class="form-input" id="newEventEndDate" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Требуется волонтёров *</label>
+              <input type="number" class="form-input" id="newEventVolunteers" min="1" value="10" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Планируемые часы работы *</label>
+              <input type="number" class="form-input" id="newEventHours" min="1" step="0.5" value="6" required>
+            </div>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--slate-500); background: var(--slate-50); padding: 0.6rem; border-radius: var(--radius-sm);">
+            ℹ️ После создания событие получает статус <strong>CREATED</strong> и отправляется администратору на модерацию.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close-modal>Отмена</button>
+          <button type="submit" class="btn btn-primary">Отправить на модерацию</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Scripts -->
+  <script src="data.js"></script>
+  <script src="graphql-client.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

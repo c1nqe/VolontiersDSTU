@@ -1,0 +1,19 @@
+{
+  "name": "volontiers-dstu",
+  "version": "0.2.0",
+  "description": "Frontend-приложение «Учет волонтеров» для ДГТУ (Хакатон ВЕСНА '25)",
+  "main": "serve.js",
+  "scripts": {
+    "start": "node serve.js",
+    "dev": "node serve.js"
+  },
+  "keywords": [
+    "volunteers",
+    "dstu",
+    "hackathon",
+    "graphql",
+    "dataspace-ce"
+  ],
+  "author": "c1nqe",
+  "license": "MIT"
+}
