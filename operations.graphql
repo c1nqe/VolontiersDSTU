@@ -1,0 +1,281 @@
+# ==============================================================================
+# GraphQL Операции: VolontiersDSTU
+# Соответствует схеме schema.graphql (DataSpace Community Edition)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. АВТОРИЗАЦИЯ И ПОЛЬЗОВАТЕЛИ
+# ------------------------------------------------------------------------------
+
+query GetCurrentUser {
+  me {
+    id
+    firstName
+    lastName
+    email
+    role
+    createdAt
+  }
+}
+
+mutation RegisterUser(
+  $firstName: String!
+  $lastName: String!
+  $email: String!
+  $password: String!
+  $role: UserRole!
+) {
+  register(
+    firstName: $firstName
+    lastName: $lastName
+    email: $email
+    password: $password
+    role: $role
+  ) {
+    token
+    user {
+      id
+      firstName
+      lastName
+      email
+      role
+    }
+  }
+}
+
+mutation LoginUser($email: String!, $password: String!) {
+  login(email: $email, password: $password) {
+    token
+    user {
+      id
+      firstName
+      lastName
+      email
+      role
+    }
+  }
+}
+
+# ------------------------------------------------------------------------------
+# 2. ОРГАНИЗАЦИИ И ВОЛОНТЁРЫ
+# ------------------------------------------------------------------------------
+
+query GetOrganizations {
+  organizations {
+    id
+    name
+    inn
+    contactPerson
+    email
+    phone
+    description
+    createdAt
+  }
+}
+
+query GetVolunteers {
+  volonteers {
+    id
+    fullName
+    email
+    phone
+    studentId
+    faculty
+    totalConfirmedHours
+    createdAt
+  }
+}
+
+mutation RegisterOrganization(
+  $name: String!
+  $contactPerson: String!
+  $email: String!
+  $phone: String!
+  $inn: String
+  $description: String
+) {
+  registerOrganization(
+    name: $name
+    contactPerson: $contactPerson
+    email: $email
+    phone: $phone
+    inn: $inn
+    description: $description
+  ) {
+    id
+    name
+    email
+  }
+}
+
+mutation RegisterVolunteer(
+  $fullName: String!
+  $email: String!
+  $phone: String!
+  $studentId: String
+  $faculty: String
+  $birthDate: String
+) {
+  registerVolonteer(
+    fullName: $fullName
+    email: $email
+    phone: $phone
+    studentId: $studentId
+    faculty: $faculty
+    birthDate: $birthDate
+  ) {
+    id
+    fullName
+    email
+    studentId
+    faculty
+  }
+}
+
+# ------------------------------------------------------------------------------
+# 3. СОБЫТИЯ (EVENTS)
+# ------------------------------------------------------------------------------
+
+query GetAvailableEvents {
+  availableEvents {
+    id
+    title
+    description
+    location
+    startDate
+    endDate
+    requiredVolunteers
+    plannedHours
+    status
+    organizationId
+    organization {
+      id
+      name
+    }
+  }
+}
+
+query GetAllEvents($status: EventStatus) {
+  events(status: $status) {
+    id
+    title
+    description
+    location
+    startDate
+    endDate
+    requiredVolunteers
+    plannedHours
+    status
+    organizationId
+  }
+}
+
+mutation CreateEvent(
+  $title: String!
+  $description: String!
+  $location: String!
+  $startDate: String!
+  $endDate: String!
+  $requiredVolunteers: Int!
+  $plannedHours: Float!
+  $organizationId: ID!
+) {
+  createEvent(
+    title: $title
+    description: $description
+    location: $location
+    startDate: $startDate
+    endDate: $endDate
+    requiredVolunteers: $requiredVolunteers
+    plannedHours: $plannedHours
+    organizationId: $organizationId
+  ) {
+    id
+    title
+    status
+    createdAt
+  }
+}
+
+mutation ModerateEvent($eventId: ID!, $status: EventStatus!) {
+  moderateEvent(eventId: $eventId, status: $status) {
+    id
+    status
+  }
+}
+
+mutation CloseEvent($eventId: ID!) {
+  closeEvent(eventId: $eventId) {
+    id
+    status
+  }
+}
+
+# ------------------------------------------------------------------------------
+# 4. ЗАЯВКИ ВОЛОНТЁРОВ (REQUESTS)
+# ------------------------------------------------------------------------------
+
+query GetRequests($volonteerId: ID, $eventId: ID, $status: RequestStatus) {
+  requests(volonteerId: $volonteerId, eventId: $eventId, status: $status) {
+    id
+    volonteerId
+    eventId
+    status
+    requestedHours
+    confirmedHours
+    createdAt
+  }
+}
+
+mutation SubmitEventRequest($volonteerId: ID!, $eventId: ID!) {
+  submitEventRequest(volonteerId: $volonteerId, eventId: $eventId) {
+    id
+    status
+    createdAt
+  }
+}
+
+mutation ModerateRequest($requestId: ID!, $status: RequestStatus!, $rejectionReason: String) {
+  moderateRequest(requestId: $requestId, status: $status, rejectionReason: $rejectionReason) {
+    id
+    status
+    rejectionReason
+  }
+}
+
+mutation ConfirmVolunteerWork($requestId: ID!, $confirmedHours: Float!) {
+  confirmVolunteerWork(requestId: $requestId, confirmedHours: $confirmedHours) {
+    id
+    status
+    confirmedHours
+  }
+}
+
+# ------------------------------------------------------------------------------
+# 5. ОФИЦИАЛЬНАЯ ВЫПИСКА ПО ЧАСАМ (STATEMENT)
+# ------------------------------------------------------------------------------
+
+query GetVolunteerStatement($volonteerId: ID!, $startDate: String!, $endDate: String!) {
+  volonteerStatement(
+    volonteerId: $volonteerId
+    startDate: $startDate
+    endDate: $endDate
+  ) {
+    volonteer {
+      id
+      fullName
+      studentId
+      faculty
+    }
+    startDate
+    endDate
+    totalHours
+    closedEventsCount
+    items {
+      eventName
+      organizationName
+      eventDate
+      confirmedHours
+    }
+  }
+}
