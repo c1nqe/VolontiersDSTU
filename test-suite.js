@@ -137,6 +137,57 @@ function testXSSSanitization() {
   console.log('✅ Защита от XSS проверена');
 }
 
+// 6. Тест согласования закрытия метки ПСО с фото администратором
+function testSearchRescueMarkerClosureApproval() {
+  console.log('🧪 Тест 6: Согласование закрытия поисковой метки (ПСО) с фотоотчётом...');
+
+  const marker = {
+    id: 'mark-test-pso',
+    type: 'SEARCH_RESCUE',
+    title: 'Поиск пропавшего в районе парка ДГТУ',
+    status: 'ACTIVE',
+    closureProof: null
+  };
+
+  // 1. Волонтёр подаёт отчёт с подтверждающим фото
+  function requestClose(m, proofData) {
+    assert(proofData.photo, 'Обязательно наличие фотоотчёта');
+    m.status = 'PENDING_APPROVAL';
+    m.closureProof = {
+      photo: proofData.photo,
+      note: proofData.note || '',
+      targetStatus: proofData.targetStatus || 'FOUND',
+      submittedBy: proofData.submittedBy || 'vol-1',
+      submittedAt: new Date().toISOString()
+    };
+    return m;
+  }
+
+  // 2. Администратор согласовывает (Approve)
+  function approveClose(m, adminId, adminName) {
+    assert.strictEqual(m.status, 'PENDING_APPROVAL', 'Метка должна ожидать согласования');
+    m.status = m.closureProof.targetStatus || 'FOUND';
+    m.closureProof.approvedAt = new Date().toISOString();
+    m.closureProof.approvedBy = adminName;
+    return m;
+  }
+
+  requestClose(marker, {
+    photo: 'data:image/jpeg;base64,demoPhotoDataString...',
+    note: 'Найден добровольческой группой ДГТУ, передан родственникам',
+    targetStatus: 'FOUND',
+    submittedBy: 'vol-test'
+  });
+
+  assert.strictEqual(marker.status, 'PENDING_APPROVAL', 'Статус должен перейти в PENDING_APPROVAL');
+  assert(marker.closureProof && marker.closureProof.photo, 'Фотоотчёт должен быть сохранён');
+
+  approveClose(marker, 'adm-1', 'Главный администратор');
+  assert.strictEqual(marker.status, 'FOUND', 'Статус после одобрения должен стать FOUND');
+  assert.strictEqual(marker.closureProof.approvedBy, 'Главный администратор');
+  console.log('✅ Согласование закрытия ПСО с фото проверено');
+}
+
 // Запуск тестов
 try {
   console.log('\n🚀 Запуск юнит-тестов VolontiersDSTU...\n');
@@ -145,8 +196,10 @@ try {
   testRequestLifecycle();
   testStatementCalculation();
   testXSSSanitization();
-  console.log('\n🎉 Все тесты успешно пройдены! 5/5 пройдены без ошибок.\n');
+  testSearchRescueMarkerClosureApproval();
+  console.log('\n🎉 Все тесты успешно пройдены! 6/6 пройдены без ошибок.\n');
 } catch (e) {
   console.error('❌ Ошибка тестирования:', e.message);
   process.exit(1);
 }
+

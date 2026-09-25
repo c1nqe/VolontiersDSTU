@@ -22,7 +22,17 @@ document.addEventListener('DOMContentLoaded', () => {
     lock: `<svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`,
     logout: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>`,
     plus: `<svg class="svg-icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`,
-    cross: `<svg class="svg-icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
+    cross: `<svg class="svg-icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
+    camera: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`,
+    image: `<svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`,
+    upload: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>`,
+    refresh: `<svg class="svg-icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`,
+    copy: `<svg class="svg-icon" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`,
+    mail: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>`,
+    phone: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>`,
+    printer: `<svg class="svg-icon" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>`,
+    fileText: `<svg class="svg-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`,
+    sparkles: `<svg class="svg-icon" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`
   };
 
   // DOM Elements
@@ -222,8 +232,12 @@ document.addEventListener('DOMContentLoaded', () => {
       bannerDesc.textContent = 'Координация поисково-спасательных операций (ПСО) и точек помощи в г. Ростов-на-Дону';
       contextControls.innerHTML = `
         <div style="display: flex; gap: 0.5rem; align-items: center;">
-          <span class="badge" style="background: rgba(220,38,38,0.2); color: #fca5a5;">🔴 ПСО</span>
-          <span class="badge" style="background: rgba(37,99,235,0.2); color: #93c5fd;">🔵 Волонтёрство</span>
+          <span class="badge" style="background: rgba(239,68,68,0.12); color: #dc2626; border: 1px solid rgba(239,68,68,0.25); display: flex; align-items: center; gap: 6px;">
+            <span class="color-dot color-dot-rescue"></span> Поисково-спасательные
+          </span>
+          <span class="badge" style="background: rgba(37,99,235,0.12); color: #2563eb; border: 1px solid rgba(37,99,235,0.25); display: flex; align-items: center; gap: 6px;">
+            <span class="color-dot color-dot-regular"></span> Волонтёрская помощь
+          </span>
         </div>
       `;
     }
@@ -422,12 +436,12 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('adminStatTotalEvents').textContent = events.length;
     document.getElementById('adminPendingBadge').textContent = `${pendingEvents.length} на рассмотрении`;
 
-    // Moderation List
+    // 1. Moderation List (Events)
     const modContainer = document.getElementById('adminModerationList');
     if (pendingEvents.length === 0) {
       modContainer.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
-          <div class="empty-state-icon">🎉</div>
+          <div class="empty-state-icon" style="color: var(--accent);">${ICONS.check}</div>
           <h4>Все события согласованы!</h4>
           <p>В очереди нет новых событий, ожидающих решения администратора.</p>
         </div>
@@ -461,10 +475,10 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div class="event-footer">
             <button class="btn btn-danger btn-sm btn-reject-event" data-id="${evt.id}">
-              ✕ Отклонить
+              ${ICONS.cross} <span>Отклонить</span>
             </button>
             <button class="btn btn-accent btn-sm btn-accept-event" data-id="${evt.id}">
-              ✓ Согласовать
+              ${ICONS.check} <span>Согласовать</span>
             </button>
           </div>
         </div>
@@ -487,25 +501,145 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // Registry: Orgs table
+    // 2. ПСО Marker Closures Moderation (с подтверждающим фото)
+    const pendingMarkers = store.getPendingMarkerApprovals();
+    const badgeClosuresTab = document.getElementById('badgePendingMarkerClosures');
+    const badgeClosuresHeader = document.getElementById('adminPendingMarkersBadge');
+    if (badgeClosuresTab) {
+      if (pendingMarkers.length > 0) {
+        badgeClosuresTab.style.display = 'inline-block';
+        badgeClosuresTab.textContent = pendingMarkers.length;
+      } else {
+        badgeClosuresTab.style.display = 'none';
+      }
+    }
+    if (badgeClosuresHeader) {
+      badgeClosuresHeader.textContent = `${pendingMarkers.length} заявок`;
+    }
+
+    const pendingMarkersContainer = document.getElementById('adminPendingMarkersList');
+    if (pendingMarkersContainer) {
+      if (pendingMarkers.length === 0) {
+        pendingMarkersContainer.innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1;">
+            <div class="empty-state-icon" style="color: var(--accent);">${ICONS.check}</div>
+            <h4>Все заявки на закрытие ПСО согласованы</h4>
+            <p>Нет меток поисково-спасательных операций, ожидающих решения администратора.</p>
+          </div>
+        `;
+      } else {
+        pendingMarkersContainer.innerHTML = pendingMarkers.map(m => {
+          const proof = m.closureProof || {};
+          const photoUrl = proof.photo || '';
+          const targetStatusLabel = proof.targetStatus === 'CLOSED' ? 'Закрытие поиска' : 'Человек найден (Жив)';
+
+          return `
+            <div class="admin-approval-card" data-id="${m.id}">
+              <div class="admin-approval-photo-box" onclick="window._zoomPhoto('${encodeURIComponent(photoUrl)}', '${encodeURIComponent(m.title)}', '${encodeURIComponent(proof.note || '')}')">
+                <img src="${photoUrl}" alt="Фотоотчёт" class="admin-approval-photo">
+                <div class="admin-approval-zoom-hint">
+                  ${ICONS.search} <span>Увеличить фото</span>
+                </div>
+              </div>
+              <div class="admin-approval-content">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem;">
+                  <span class="badge badge-pending">На согласовании</span>
+                  <span class="urgency-badge urgency-high">ПСО</span>
+                </div>
+                <div style="font-weight: 700; font-size: 0.95rem; color: var(--slate-900); margin-top: 2px;">
+                  ${m.title}
+                </div>
+                <div style="font-size: 0.75rem; color: var(--slate-500); display: flex; flex-direction: column; gap: 3px;">
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    ${ICONS.mapPin} <span>${m.lastSeenLocation || (m.lat + ', ' + m.lng)}</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    ${ICONS.user} <span>Подал: <strong>${proof.submittedByName || m.createdByName}</strong></span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    ${ICONS.award} <span>Целевой статус: <strong>${targetStatusLabel}</strong></span>
+                  </div>
+                </div>
+
+                <div class="admin-approval-report">
+                  <div style="font-weight: 700; font-size: 0.75rem; color: #92400e; margin-bottom: 2px;">Рапорт поисковой группы:</div>
+                  ${proof.note || 'Комментарий не указан'}
+                </div>
+
+                <div class="admin-approval-actions">
+                  <button class="btn btn-outline btn-sm btn-reject-marker" data-id="${m.id}" style="color: #dc2626; border-color: #fca5a5;">
+                    ${ICONS.cross} <span>Отклонить</span>
+                  </button>
+                  <button class="btn btn-accent btn-sm btn-approve-marker" data-id="${m.id}" style="flex: 1;">
+                    ${ICONS.check} <span>Одобрить (Approve)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        pendingMarkersContainer.querySelectorAll('.btn-approve-marker').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const markerId = btn.dataset.id;
+            const currentAdmin = store.getCurrentUser();
+            store.approveMarkerClose(
+              markerId,
+              currentAdmin ? currentAdmin.id : 'adm-1',
+              currentAdmin ? `${currentAdmin.firstName} ${currentAdmin.lastName}` : 'Администратор сервиса'
+            );
+            showToast('Завершение поисковой операции одобрено! Статус обновлён на «Найден».');
+            renderAdminView();
+            renderMapMarkers();
+            renderMapStats();
+            renderMapSidebar();
+          });
+        });
+
+        pendingMarkersContainer.querySelectorAll('.btn-reject-marker').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const markerId = btn.dataset.id;
+            const reason = prompt(
+              'Укажите причину отклонения заявки на закрытие ПСО:',
+              'Недостаточно подтверждающих материалов / требуется повторный выезд'
+            );
+            if (reason === null) return;
+            store.rejectMarkerClose(markerId, reason);
+            showToast('Заявка на закрытие отклонена. Метка возвращена в статус активного поиска.', 'error');
+            renderAdminView();
+            renderMapMarkers();
+            renderMapStats();
+            renderMapSidebar();
+          });
+        });
+      }
+    }
+
+    // 3. Registry: Orgs table
     const tableOrgsBody = document.querySelector('#adminTableOrgs tbody');
     tableOrgsBody.innerHTML = orgs.map(o => `
       <tr>
         <td><strong>${o.name}</strong><br><span style="color: #64748b; font-size: 0.8rem;">${o.description || ''}</span></td>
         <td>${o.contactPerson}</td>
-        <td>✉️ ${o.email}<br>📞 ${o.phone}</td>
+        <td>
+          <div style="display: flex; align-items: center; gap: 4px;">${ICONS.mail} ${o.email}</div>
+          <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">${ICONS.phone} ${o.phone}</div>
+        </td>
         <td>${o.inn || '—'}</td>
       </tr>
     `).join('');
 
-    // Registry: Vols table
+    // 4. Registry: Vols table
     const tableVolsBody = document.querySelector('#adminTableVols tbody');
     tableVolsBody.innerHTML = vols.map(v => `
       <tr>
         <td><strong>${v.fullName}</strong></td>
         <td><code>${v.studentId || '—'}</code></td>
         <td>${v.faculty || '—'}</td>
-        <td>✉️ ${v.email}<br>📞 ${v.phone}</td>
+        <td>
+          <div style="display: flex; align-items: center; gap: 4px;">${ICONS.mail} ${v.email}</div>
+          <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">${ICONS.phone} ${v.phone}</div>
+        </td>
         <td><strong style="color: var(--accent);">${v.totalConfirmedHours} ч</strong></td>
       </tr>
     `).join('');
@@ -574,7 +708,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (myEvents.length === 0) {
       eventsContainer.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
-          <div class="empty-state-icon">📂</div>
+          <div class="empty-state-icon" style="color: var(--slate-400);">${ICONS.fileText}</div>
           <h4>У вашей организации пока нет событий</h4>
           <p>Нажмите «Создать событие», чтобы запустить регистрацию волонтеров.</p>
         </div>
@@ -617,7 +751,9 @@ document.addEventListener('DOMContentLoaded', () => {
                   Закрыть событие
                 </button>
               ` : evt.status === 'CLOSED' ? `
-                <span style="font-size: 0.8rem; color: #047857; font-weight: 600;">✓ Завершено</span>
+                <span style="font-size: 0.8rem; color: #047857; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                  ${ICONS.check} <span>Завершено</span>
+                </span>
               ` : `
                 <span style="font-size: 0.8rem; color: #b45309;">На модерации</span>
               `}
@@ -710,12 +846,14 @@ document.addEventListener('DOMContentLoaded', () => {
             ${r.status === 'ACCEPTED' ? `
               <div style="display: flex; align-items: center; gap: 0.5rem;">
                 <input type="number" class="form-input" style="width: 80px; padding: 0.35rem 0.5rem;" id="hours_${r.id}" value="${r.requestedHours}" min="1" step="0.5">
-                <button class="btn btn-accent btn-sm btn-confirm-work" data-id="${r.id}">
-                  ✓ Подтвердить
+                <button class="btn btn-accent btn-sm btn-confirm-work" data-id="${r.id}" style="display: inline-flex; align-items: center; gap: 4px;">
+                  ${ICONS.check} <span>Подтвердить</span>
                 </button>
               </div>
             ` : `
-              <span style="font-size: 0.85rem; color: #047857; font-weight: 600;">✓ Часы начислены (${r.confirmedHours} ч)</span>
+              <span style="font-size: 0.85rem; color: #047857; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                ${ICONS.check} <span>Часы начислены (${r.confirmedHours} ч)</span>
+              </span>
             `}
           </td>
         </tr>
@@ -813,7 +951,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (filteredEvents.length === 0) {
       catalogContainer.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
-          <div class="empty-state-icon">🔍</div>
+          <div class="empty-state-icon" style="color: var(--slate-400);">${ICONS.search}</div>
           <h4>Доступных событий не найдено</h4>
           <p>Попробуйте изменить поисковый запрос или дождитесь публикации новых событий организаторами.</p>
         </div>
@@ -832,11 +970,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           let reqBadge = 'badge-pending';
           let reqText = 'Заявка на рассмотрении';
-          if (existingReq.status === 'ACCEPTED') { reqBadge = 'badge-accepted'; reqText = 'Вы приняты!'; }
+          if (existingReq.status === 'ACCEPTED') { reqBadge = 'badge-accepted'; reqText = 'Вы приняты'; }
           else if (existingReq.status === 'CONFIRMED') { reqBadge = 'badge-confirmed'; reqText = `Часы подтверждены (${existingReq.confirmedHours} ч)`; }
           else if (existingReq.status === 'CANCELLED') { reqBadge = 'badge-cancelled'; reqText = 'Заявка отклонена'; }
 
-          actionButtonHtml = `<span class="badge ${reqBadge}">✓ ${reqText}</span>`;
+          actionButtonHtml = `<span class="badge ${reqBadge}" style="display: inline-flex; align-items: center; gap: 4px;">${existingReq.status === 'ACCEPTED' || existingReq.status === 'CONFIRMED' ? ICONS.check : ''} <span>${reqText}</span></span>`;
         }
 
         return `
@@ -937,7 +1075,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!report || report.items.length === 0) {
       container.innerHTML = `
         <div class="empty-state">
-          <div class="empty-state-icon">📋</div>
+          <div class="empty-state-icon" style="color: var(--slate-400);">${ICONS.fileText}</div>
           <h4>Нет закрытых событий с подтверждёнными часами за указанный период</h4>
           <p>В выписку попадают только события со статусом <strong>CLOSED</strong>, где организатор подтвердил факт работы (<strong>CONFIRMED</strong>).</p>
         </div>
@@ -1009,7 +1147,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="stamp-box">
             ВОЛОНТЁРСКИЙ ЦЕНТР<br>
             ДГТУ «ГОРЯЩИЕ СЕРДЦА»<br>
-            ★ ВЕСНА '25 ★<br>
+            ВЕСНА '25<br>
             ПОДТВЕРЖДЕНО
           </div>
         </div>
@@ -1089,8 +1227,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     container.innerHTML = `
       <div style="position: relative; width: 100%; height: 100%; background: #e2e8f0; overflow: hidden; user-select: none;">
-        <div style="position: absolute; top: 12px; left: 14px; z-index: 10; background: rgba(255,255,255,0.92); backdrop-filter: blur(4px); padding: 6px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; display: flex; align-items: center; gap: 6px;">
-          <span>🗺️</span> <strong>Карта Ростова-на-Дону (ДГТУ)</strong>
+        <div style="position: absolute; top: 12px; left: 14px; z-index: 10; background: rgba(255,255,255,0.95); backdrop-filter: blur(6px); padding: 6px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #cbd5e1; display: flex; align-items: center; gap: 8px;">
+          <span style="color: var(--primary); display: flex; align-items: center;">${ICONS.map}</span>
+          <strong>Карта Ростова-на-Дону (ДГТУ)</strong>
           <span style="color: #64748b; font-weight: normal; font-size: 0.75rem;">• Кликните в любое место, чтобы поставить метку</span>
         </div>
         <svg id="svgMapCanvas" viewBox="0 0 900 550" style="width: 100%; height: 100%; cursor: crosshair;">
@@ -1151,7 +1290,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </svg>
 
         <!-- Popover карточки метки при клике на SVG -->
-        <div id="svgMarkerPopup" style="display: none; position: absolute; z-index: 100; background: white; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); padding: 16px; width: 280px; border: 1px solid #e2e8f0; pointer-events: auto;"></div>
+        <div id="svgMarkerPopup" style="display: none; position: absolute; z-index: 100; background: white; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); padding: 16px; width: 300px; border: 1px solid #e2e8f0; pointer-events: auto;"></div>
       </div>
     `;
 
@@ -1193,14 +1332,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function getMarkerColor(marker) {
-    if (marker.status === 'FOUND') return '#16a34a';
-    if (marker.status === 'CLOSED') return '#6b7280';
+    if (marker.status === 'PENDING_APPROVAL') return '#f59e0b';
+    if (marker.status === 'FOUND') return '#10b981';
+    if (marker.status === 'CLOSED') return '#64748b';
     if (marker.type === 'SEARCH_RESCUE') return '#dc2626';
     return '#2563eb';
   }
 
   function getMarkerRadius(marker) {
-    if (marker.type === 'SEARCH_RESCUE' && marker.status === 'ACTIVE') return 12;
+    if (marker.type === 'SEARCH_RESCUE' && (marker.status === 'ACTIVE' || marker.status === 'PENDING_APPROVAL')) return 12;
     return 9;
   }
 
@@ -1222,11 +1362,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Применяем фильтр
     if (currentMapFilter === 'SEARCH_RESCUE') {
-      markers = markers.filter(m => m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE');
+      markers = markers.filter(m => m.type === 'SEARCH_RESCUE' && (m.status === 'ACTIVE' || m.status === 'PENDING_APPROVAL'));
     } else if (currentMapFilter === 'REGULAR') {
       markers = markers.filter(m => m.type === 'REGULAR' && m.status === 'ACTIVE');
     } else if (currentMapFilter === 'FOUND') {
       markers = markers.filter(m => m.status === 'FOUND');
+    } else if (currentMapFilter === 'PENDING') {
+      markers = markers.filter(m => m.status === 'PENDING_APPROVAL');
     }
 
     // Режим Leaflet
@@ -1242,65 +1384,101 @@ document.addEventListener('DOMContentLoaded', () => {
           radius: radius,
           fillColor: color,
           color: '#ffffff',
-          weight: 2,
+          weight: 2.5,
           opacity: 1,
-          fillOpacity: isActive ? 0.9 : 0.5
+          fillOpacity: isActive ? 0.92 : 0.65
         }).addTo(mapMarkerLayer);
 
-        if (m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE' && m.urgency === 'HIGH') {
+        if (m.type === 'SEARCH_RESCUE' && (m.status === 'ACTIVE' || m.status === 'PENDING_APPROVAL') && m.urgency === 'HIGH') {
           L.circleMarker([m.lat, m.lng], {
             radius: radius + 8,
             fillColor: color,
             color: color,
             weight: 1,
-            opacity: 0.3,
-            fillOpacity: 0.1
+            opacity: 0.35,
+            fillOpacity: 0.12
           }).addTo(mapMarkerLayer);
         }
 
-        const typeLabel = m.type === 'SEARCH_RESCUE' ? '🔴 Поисково-спасательная' : '🔵 Обычное волонтёрство';
+        const typeLabel = m.type === 'SEARCH_RESCUE'
+          ? '<span class="color-badge-panel rescue" style="font-size:0.75rem; padding: 2px 7px;"><span class="color-dot-rescue"></span> Поисково-спасательная</span>'
+          : '<span class="color-badge-panel regular" style="font-size:0.75rem; padding: 2px 7px;"><span class="color-dot-regular"></span> Волонтёрская</span>';
+
         let statusLabel = 'Активна';
-        let statusColor = color;
-        if (m.status === 'FOUND') { statusLabel = '✅ Человек найден'; statusColor = '#16a34a'; }
-        else if (m.status === 'CLOSED') { statusLabel = 'Закрыта'; statusColor = '#6b7280'; }
+        let statusColor = '#2563eb';
+        if (m.status === 'FOUND') { statusLabel = 'Человек найден'; statusColor = '#10b981'; }
+        else if (m.status === 'PENDING_APPROVAL') { statusLabel = 'На согласовании у администратора'; statusColor = '#f59e0b'; }
+        else if (m.status === 'CLOSED') { statusLabel = 'Закрыта'; statusColor = '#64748b'; }
 
         const urgencyHtml = m.urgency === 'HIGH' ? '<span class="urgency-badge urgency-high">Срочно</span>'
           : m.urgency === 'MEDIUM' ? '<span class="urgency-badge urgency-medium">Средняя</span>'
           : '<span class="urgency-badge urgency-low">Низкая</span>';
 
         const lastSeenHtml = m.lastSeenLocation
-          ? `<div style="font-size: 0.75rem; margin-top: 0.3rem;"><strong>Последнее место:</strong> ${m.lastSeenLocation} (${m.lastSeenDate})</div>`
+          ? `<div style="font-size: 0.75rem; margin-top: 0.35rem; color: #334155;"><strong>Последнее место:</strong> ${m.lastSeenLocation} (${m.lastSeenDate || 'н/д'})</div>`
           : '';
+
+        let proofPhotoHtml = '';
+        if (m.closureProof && m.closureProof.photo) {
+          const proofUrl = m.closureProof.photo;
+          proofPhotoHtml = `
+            <div style="margin-top: 0.5rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px;">
+              <div style="font-size: 0.72rem; font-weight: 700; color: #475569; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+                ${ICONS.camera} Фотоотчёт операции:
+              </div>
+              <div style="position: relative; border-radius: 4px; overflow: hidden; max-height: 110px; cursor: pointer;" onclick="window._zoomPhoto('${encodeURIComponent(proofUrl)}', '${encodeURIComponent(m.title)}', '${encodeURIComponent(m.closureProof.note || '')}')">
+                <img src="${proofUrl}" alt="Фотоотчёт" style="width: 100%; height: 95px; object-fit: cover;">
+                <div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.65); color: white; font-size: 0.65rem; text-align: center; padding: 2px;">
+                  Нажмите для увеличения
+                </div>
+              </div>
+              ${m.closureProof.note ? `<div style="font-size: 0.7rem; color: #64748b; margin-top: 4px; font-style: italic;">«${m.closureProof.note}»</div>` : ''}
+            </div>
+          `;
+        }
 
         let actionsHtml = '';
         if (m.status === 'ACTIVE') {
           if (m.type === 'SEARCH_RESCUE') {
             actionsHtml = `
-              <div class="map-popup-actions">
-                <button class="btn btn-accent btn-sm" onclick="window._mapMarkFound('${m.id}')">✅ Найден</button>
-                <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${m.id}')">Закрыть</button>
+              <div class="map-popup-actions" style="margin-top: 0.6rem; display: flex; gap: 0.4rem;">
+                <button class="btn btn-accent btn-sm" onclick="window._mapMarkFound('${m.id}')" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px;">
+                  ${ICONS.camera} <span>Завершить (с фото)</span>
+                </button>
+                <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${m.id}')">
+                  <span>Закрыть</span>
+                </button>
               </div>`;
           } else {
             actionsHtml = `
-              <div class="map-popup-actions">
-                <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${m.id}')">Закрыть метку</button>
+              <div class="map-popup-actions" style="margin-top: 0.6rem;">
+                <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${m.id}')" style="width: 100%;">
+                  <span>Закрыть метку</span>
+                </button>
               </div>`;
           }
+        } else if (m.status === 'PENDING_APPROVAL') {
+          actionsHtml = `
+            <div style="margin-top: 0.6rem; padding: 6px 10px; background: #fef3c7; border: 1px solid #fde68a; border-radius: 6px; font-size: 0.72rem; color: #92400e; display: flex; align-items: center; gap: 6px;">
+              ${ICONS.clock} <span>Фотоотчёт направлен администратору на согласование</span>
+            </div>
+          `;
         }
 
         circle.bindPopup(`
           <div class="map-popup">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
               <span style="font-size: 0.75rem; color: ${statusColor}; font-weight: 700;">${statusLabel}</span>
               ${urgencyHtml}
             </div>
-            <h4>${m.title}</h4>
-            <p>${m.description}</p>
+            <h4 style="font-size: 0.95rem; margin: 0 0 0.25rem 0;">${m.title}</h4>
+            <p style="font-size: 0.8rem; color: #475569; margin: 0 0 0.35rem 0;">${m.description}</p>
             ${lastSeenHtml}
-            <div class="map-popup-meta">
+            ${proofPhotoHtml}
+            <div class="map-popup-meta" style="margin-top: 0.5rem; font-size: 0.75rem; color: #64748b; display: flex; flex-direction: column; gap: 3px;">
               <div>${typeLabel}</div>
-              <div>📞 ${m.contactPhone || 'Не указан'}</div>
-              <div>👤 ${m.createdByName} • ${new Date(m.createdAt).toLocaleDateString('ru-RU')}</div>
+              <div style="display: flex; align-items: center; gap: 4px;">${ICONS.phone} <span>${m.contactPhone || 'Не указан'}</span></div>
+              <div style="display: flex; align-items: center; gap: 4px;">${ICONS.user} <span>${m.createdByName} • ${new Date(m.createdAt).toLocaleDateString('ru-RU')}</span></div>
             </div>
             ${actionsHtml}
           </div>
@@ -1316,7 +1494,8 @@ document.addEventListener('DOMContentLoaded', () => {
     svgGroup.innerHTML = markers.map(m => {
       const pt = projectToSvg(m.lat, m.lng);
       const color = getMarkerColor(m);
-      const isUrgent = m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE' && m.urgency === 'HIGH';
+      const isUrgent = m.type === 'SEARCH_RESCUE' && (m.status === 'ACTIVE' || m.status === 'PENDING_APPROVAL') && m.urgency === 'HIGH';
+      const isPending = m.status === 'PENDING_APPROVAL';
 
       return `
         <g class="svg-marker-node" data-id="${m.id}" data-x="${pt.x}" data-y="${pt.y}" style="cursor: pointer;">
@@ -1327,8 +1506,9 @@ document.addEventListener('DOMContentLoaded', () => {
             </circle>
           ` : ''}
           <circle cx="${pt.x}" cy="${pt.y}" r="${m.type === 'SEARCH_RESCUE' ? '12' : '9'}" fill="${color}" stroke="#ffffff" stroke-width="2.5" />
+          ${isPending ? `<circle cx="${pt.x + 8}" cy="${pt.y - 8}" r="5" fill="#f59e0b" stroke="#ffffff" stroke-width="1.5" />` : ''}
           <text x="${pt.x}" y="${pt.y - 15}" fill="#0f172a" font-size="11" font-weight="700" text-anchor="middle" style="text-shadow: 0 1px 3px rgba(255,255,255,0.9);">
-            ${m.type === 'SEARCH_RESCUE' ? '🔴 ' : '🔵 '}${m.title.length > 25 ? m.title.substring(0, 25) + '...' : m.title}
+            ${m.title.length > 25 ? m.title.substring(0, 25) + '...' : m.title}
           </text>
         </g>
       `;
@@ -1350,9 +1530,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!marker || !popup) return;
 
     const color = getMarkerColor(marker);
-    const typeLabel = marker.type === 'SEARCH_RESCUE' ? '🔴 Поисково-спасательная' : '🔵 Обычное волонтёрство';
+    const typeLabel = marker.type === 'SEARCH_RESCUE'
+      ? '<span class="color-badge-panel rescue" style="font-size:0.75rem; padding: 2px 7px;"><span class="color-dot-rescue"></span> Поисково-спасательная</span>'
+      : '<span class="color-badge-panel regular" style="font-size:0.75rem; padding: 2px 7px;"><span class="color-dot-regular"></span> Волонтёрская</span>';
+
     let statusLabel = 'Активна';
-    if (marker.status === 'FOUND') statusLabel = '✅ Человек найден';
+    if (marker.status === 'FOUND') statusLabel = 'Человек найден';
+    else if (marker.status === 'PENDING_APPROVAL') statusLabel = 'На согласовании у администратора';
     else if (marker.status === 'CLOSED') statusLabel = 'Закрыта';
 
     const urgencyHtml = marker.urgency === 'HIGH' ? '<span class="urgency-badge urgency-high">Срочно</span>'
@@ -1360,23 +1544,54 @@ document.addEventListener('DOMContentLoaded', () => {
       : '<span class="urgency-badge urgency-low">Низкая</span>';
 
     const lastSeenHtml = marker.lastSeenLocation
-      ? `<div style="font-size: 0.75rem; margin-top: 0.3rem;"><strong>Последнее место:</strong> ${marker.lastSeenLocation} (${marker.lastSeenDate})</div>`
+      ? `<div style="font-size: 0.75rem; margin-top: 0.35rem; color: #334155;"><strong>Последнее место:</strong> ${marker.lastSeenLocation} (${marker.lastSeenDate || 'н/д'})</div>`
       : '';
+
+    let proofPhotoHtml = '';
+    if (marker.closureProof && marker.closureProof.photo) {
+      const proofUrl = marker.closureProof.photo;
+      proofPhotoHtml = `
+        <div style="margin-top: 0.5rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px;">
+          <div style="font-size: 0.72rem; font-weight: 700; color: #475569; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+            ${ICONS.camera} Фотоотчёт операции:
+          </div>
+          <div style="position: relative; border-radius: 4px; overflow: hidden; max-height: 100px; cursor: pointer;" onclick="window._zoomPhoto('${encodeURIComponent(proofUrl)}', '${encodeURIComponent(marker.title)}', '${encodeURIComponent(marker.closureProof.note || '')}')">
+            <img src="${proofUrl}" alt="Фотоотчёт" style="width: 100%; height: 90px; object-fit: cover;">
+            <div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.65); color: white; font-size: 0.65rem; text-align: center; padding: 2px;">
+              Нажмите для увеличения
+            </div>
+          </div>
+          ${marker.closureProof.note ? `<div style="font-size: 0.7rem; color: #64748b; margin-top: 4px; font-style: italic;">«${marker.closureProof.note}»</div>` : ''}
+        </div>
+      `;
+    }
 
     let actionsHtml = '';
     if (marker.status === 'ACTIVE') {
       if (marker.type === 'SEARCH_RESCUE') {
         actionsHtml = `
-          <div class="map-popup-actions">
-            <button class="btn btn-accent btn-sm" onclick="window._mapMarkFound('${marker.id}')">✅ Найден</button>
-            <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${marker.id}')">Закрыть</button>
+          <div class="map-popup-actions" style="margin-top: 0.6rem; display: flex; gap: 0.4rem;">
+            <button class="btn btn-accent btn-sm" onclick="window._mapMarkFound('${marker.id}')" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px;">
+              ${ICONS.camera} <span>Завершить (с фото)</span>
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${marker.id}')">
+              <span>Закрыть</span>
+            </button>
           </div>`;
       } else {
         actionsHtml = `
-          <div class="map-popup-actions">
-            <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${marker.id}')">Закрыть метку</button>
+          <div class="map-popup-actions" style="margin-top: 0.6rem;">
+            <button class="btn btn-outline btn-sm" onclick="window._mapCloseMarker('${marker.id}')" style="width: 100%;">
+              <span>Закрыть метку</span>
+            </button>
           </div>`;
       }
+    } else if (marker.status === 'PENDING_APPROVAL') {
+      actionsHtml = `
+        <div style="margin-top: 0.6rem; padding: 6px 10px; background: #fef3c7; border: 1px solid #fde68a; border-radius: 6px; font-size: 0.72rem; color: #92400e; display: flex; align-items: center; gap: 6px;">
+          ${ICONS.clock} <span>Фотоотчёт направлен администратору на согласование</span>
+        </div>
+      `;
     }
 
     popup.innerHTML = `
@@ -1387,13 +1602,14 @@ document.addEventListener('DOMContentLoaded', () => {
       <h4 style="font-size: 0.95rem; margin-bottom: 0.4rem;">${marker.title}</h4>
       <p style="font-size: 0.8rem; color: #475569; margin-bottom: 0.4rem;">${marker.description}</p>
       ${lastSeenHtml}
-      <div class="map-popup-meta">
+      ${proofPhotoHtml}
+      <div class="map-popup-meta" style="margin-top: 0.5rem; font-size: 0.75rem; color: #64748b; display: flex; flex-direction: column; gap: 3px;">
         <div>${typeLabel}</div>
-        <div>📞 ${marker.contactPhone || 'Не указан'}</div>
-        <div>👤 ${marker.createdByName}</div>
+        <div style="display: flex; align-items: center; gap: 4px;">${ICONS.phone} <span>${marker.contactPhone || 'Не указан'}</span></div>
+        <div style="display: flex; align-items: center; gap: 4px;">${ICONS.user} <span>${marker.createdByName}</span></div>
       </div>
       ${actionsHtml}
-      <button style="position: absolute; top: 8px; right: 8px; border: none; background: transparent; font-size: 1.1rem; cursor: pointer; color: #94a3b8;" onclick="document.getElementById('svgMarkerPopup').style.display='none'">&times;</button>
+      <button style="position: absolute; top: 8px; right: 8px; border: none; background: transparent; font-size: 1.25rem; cursor: pointer; color: #94a3b8; line-height: 1;" onclick="document.getElementById('svgMarkerPopup').style.display='none'">&times;</button>
     `;
 
     // Позиционируем попап
@@ -1403,8 +1619,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const relX = (x / 900) * cWidth;
     const relY = (y / 550) * cHeight;
 
-    const left = Math.min(cWidth - 290, Math.max(10, relX - 140));
-    const top = Math.min(cHeight - 240, Math.max(10, relY - 180));
+    const left = Math.min(cWidth - 310, Math.max(10, relX - 150));
+    const top = Math.min(cHeight - 270, Math.max(10, relY - 190));
 
     popup.style.left = `${left}px`;
     popup.style.top = `${top}px`;
@@ -1416,50 +1632,80 @@ document.addEventListener('DOMContentLoaded', () => {
     const searchActive = all.filter(m => m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE').length;
     const regular = all.filter(m => m.type === 'REGULAR' && m.status === 'ACTIVE').length;
     const found = all.filter(m => m.status === 'FOUND').length;
+    const pending = all.filter(m => m.status === 'PENDING_APPROVAL').length;
 
-    document.getElementById('mapStatSearchActive').textContent = searchActive;
-    document.getElementById('mapStatRegular').textContent = regular;
-    document.getElementById('mapStatFound').textContent = found;
-    document.getElementById('mapStatTotal').textContent = all.length;
+    const elSearch = document.getElementById('mapStatSearchActive');
+    const elReg = document.getElementById('mapStatRegular');
+    const elFound = document.getElementById('mapStatFound');
+    const elPending = document.getElementById('mapStatPending');
+    const elTotal = document.getElementById('mapStatTotal');
+
+    if (elSearch) elSearch.textContent = searchActive;
+    if (elReg) elReg.textContent = regular;
+    if (elFound) elFound.textContent = found;
+    if (elPending) elPending.textContent = pending;
+    if (elTotal) elTotal.textContent = all.length;
   }
 
   function renderMapSidebar() {
     let markers = store.getMapMarkers('ALL');
 
     if (currentMapFilter === 'SEARCH_RESCUE') {
-      markers = markers.filter(m => m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE');
+      markers = markers.filter(m => m.type === 'SEARCH_RESCUE' && (m.status === 'ACTIVE' || m.status === 'PENDING_APPROVAL'));
     } else if (currentMapFilter === 'REGULAR') {
       markers = markers.filter(m => m.type === 'REGULAR' && m.status === 'ACTIVE');
     } else if (currentMapFilter === 'FOUND') {
       markers = markers.filter(m => m.status === 'FOUND');
+    } else if (currentMapFilter === 'PENDING') {
+      markers = markers.filter(m => m.status === 'PENDING_APPROVAL');
     }
 
     const listContainer = document.getElementById('mapMarkerList');
+    if (!listContainer) return;
 
     if (markers.length === 0) {
       listContainer.innerHTML = `
-        <div style="text-align: center; padding: 1.5rem; color: #64748b; font-size: 0.85rem;">
+        <div style="text-align: center; padding: 2rem 1rem; color: #64748b; font-size: 0.85rem;">
+          <div style="margin-bottom: 0.5rem; opacity: 0.4;">${ICONS.mapPin}</div>
           Нет меток для выбранного фильтра
         </div>`;
       return;
     }
 
     listContainer.innerHTML = markers.map(m => {
-      const typeClass = m.status === 'FOUND' ? 'found' : m.type === 'SEARCH_RESCUE' ? 'search-rescue' : 'regular';
+      const isPending = m.status === 'PENDING_APPROVAL';
+      const isFound = m.status === 'FOUND';
+      const isRescue = m.type === 'SEARCH_RESCUE';
+
+      let cardBorderClass = isPending ? 'pending' : isFound ? 'found' : isRescue ? 'search-rescue' : 'regular';
+
       const urgencyHtml = m.urgency === 'HIGH' ? '<span class="urgency-badge urgency-high">Срочно</span>'
         : m.urgency === 'MEDIUM' ? '<span class="urgency-badge urgency-medium">Средняя</span>'
         : '<span class="urgency-badge urgency-low">Низкая</span>';
-      const statusText = m.status === 'FOUND' ? '✅ Найден' : m.status === 'CLOSED' ? '⬜ Закрыта' : '';
+
+      let statusBadge = '';
+      if (isPending) {
+        statusBadge = '<span class="badge badge-pending" style="font-size: 0.65rem;">Согласование фото</span>';
+      } else if (isFound) {
+        statusBadge = '<span class="badge badge-accepted" style="font-size: 0.65rem;">Найден</span>';
+      } else if (m.status === 'CLOSED') {
+        statusBadge = '<span class="badge" style="background:#e2e8f0; color:#475569; font-size: 0.65rem;">Закрыта</span>';
+      }
 
       return `
-        <div class="marker-list-card ${typeClass}" data-lat="${m.lat}" data-lng="${m.lng}" data-id="${m.id}">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
-            ${urgencyHtml}
+        <div class="marker-list-card ${cardBorderClass}" data-lat="${m.lat}" data-lng="${m.lng}" data-id="${m.id}">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+            <div style="display: flex; align-items: center; gap: 0.4rem;">
+              ${urgencyHtml}
+              ${statusBadge}
+            </div>
             <span style="font-size: 0.7rem; color: #94a3b8;">${new Date(m.createdAt).toLocaleDateString('ru-RU')}</span>
           </div>
           <div class="marker-list-title">${m.title}</div>
-          <div class="marker-list-meta">
-            👤 ${m.createdByName} ${statusText}
+          <div class="marker-list-meta" style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+            ${ICONS.user}
+            <span>${m.createdByName}</span>
+            ${m.closureProof && m.closureProof.photo ? `<span style="margin-left: auto; color: #f59e0b; display: flex; align-items: center; gap: 3px; font-size: 0.7rem;">${ICONS.camera} Фото</span>` : ''}
           </div>
         </div>
       `;
@@ -1487,10 +1733,259 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ==========================================
+  // МОДАЛЬНОЕ ОКНО ЗАКРЫТИЯ МЕТКИ ПСО С ФОТООТЧЁТОМ
+  // ==========================================
+  function openCloseSearchMarkerModal(markerId, targetStatus = 'FOUND') {
+    const user = store.getCurrentUser();
+    if (!user) {
+      showToast('Для отправки отчёта о завершении поиска необходимо авторизоваться', 'info');
+      modalLogin.classList.add('open');
+      return;
+    }
+
+    const marker = (store.getMapMarkers('ALL') || []).find(m => m.id === markerId);
+    if (!marker) return;
+
+    const modal = document.getElementById('modalCloseSearchMarker');
+    const summaryBox = document.getElementById('closeMarkerSummary');
+    const markerIdInput = document.getElementById('closeMarkerId');
+    const targetStatusInput = document.getElementById('closeMarkerTargetStatus');
+    const photoDataInput = document.getElementById('closeMarkerPhotoData');
+    const photoFile = document.getElementById('closeMarkerPhotoFile');
+    const photoUploadPrompt = document.getElementById('photoUploadPrompt');
+    const photoPreviewWrap = document.getElementById('photoPreviewWrap');
+    const photoPreviewImg = document.getElementById('photoPreviewImg');
+    const noteInput = document.getElementById('closeMarkerNote');
+
+    if (!modal) return;
+
+    markerIdInput.value = markerId;
+    if (targetStatusInput) targetStatusInput.value = targetStatus;
+    if (photoDataInput) photoDataInput.value = '';
+    if (photoFile) photoFile.value = '';
+    if (photoUploadPrompt) photoUploadPrompt.style.display = 'block';
+    if (photoPreviewWrap) photoPreviewWrap.style.display = 'none';
+    if (photoPreviewImg) photoPreviewImg.src = '';
+    if (noteInput) noteInput.value = '';
+
+    if (summaryBox) {
+      summaryBox.innerHTML = `
+        <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+          <div class="color-badge-panel rescue" style="padding: 0.4rem 0.65rem; border-radius: 8px;">
+            <span class="color-dot-rescue"></span>
+            <span style="font-size: 0.75rem; font-weight: 700; color: #dc2626;">ПСО</span>
+          </div>
+          <div style="flex: 1;">
+            <div style="font-weight: 700; color: var(--slate-900); font-size: 0.95rem;">${marker.title}</div>
+            <div style="font-size: 0.8rem; color: var(--slate-500); margin-top: 3px;">
+              ${marker.lastSeenLocation ? `Последнее место: <strong>${marker.lastSeenLocation}</strong> (${marker.lastSeenDate || 'н/д'}) • ` : ''}
+              Координаты: ${marker.lat.toFixed(4)}, ${marker.lng.toFixed(4)}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Закрываем SVG popup если открыт
+    const popup = document.getElementById('svgMarkerPopup');
+    if (popup) popup.style.display = 'none';
+
+    modal.classList.add('open');
+  }
+
+  // Настройка Drag-and-Drop и загрузки фото
+  function initModalCloseSearchMarker() {
+    const photoDropZone = document.getElementById('photoDropZone');
+    const photoFile = document.getElementById('closeMarkerPhotoFile');
+    const photoDataInput = document.getElementById('closeMarkerPhotoData');
+    const photoUploadPrompt = document.getElementById('photoUploadPrompt');
+    const photoPreviewWrap = document.getElementById('photoPreviewWrap');
+    const photoPreviewImg = document.getElementById('photoPreviewImg');
+    const btnReplacePhoto = document.getElementById('btnReplacePhoto');
+    const btnRemovePhoto = document.getElementById('btnRemovePhoto');
+    const btnUseDemoPhoto = document.getElementById('btnUseDemoPhoto');
+    const formCloseSearch = document.getElementById('formCloseSearchMarker');
+    const modalCloseSearch = document.getElementById('modalCloseSearchMarker');
+
+    function setPhotoPreview(dataUrl) {
+      if (photoDataInput) photoDataInput.value = dataUrl;
+      if (photoPreviewImg) photoPreviewImg.src = dataUrl;
+      if (photoUploadPrompt) photoUploadPrompt.style.display = 'none';
+      if (photoPreviewWrap) photoPreviewWrap.style.display = 'block';
+    }
+
+    function clearPhotoPreview() {
+      if (photoDataInput) photoDataInput.value = '';
+      if (photoFile) photoFile.value = '';
+      if (photoPreviewImg) photoPreviewImg.src = '';
+      if (photoPreviewWrap) photoPreviewWrap.style.display = 'none';
+      if (photoUploadPrompt) photoUploadPrompt.style.display = 'block';
+    }
+
+    if (photoDropZone && photoFile) {
+      photoDropZone.addEventListener('click', (e) => {
+        if (e.target.closest('#btnReplacePhoto') || e.target.closest('#btnRemovePhoto')) return;
+        if (photoPreviewWrap && photoPreviewWrap.style.display === 'block') return;
+        photoFile.click();
+      });
+
+      photoFile.addEventListener('change', () => {
+        const file = photoFile.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => setPhotoPreview(e.target.result);
+        reader.readAsDataURL(file);
+      });
+
+      photoDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        photoDropZone.classList.add('dragover');
+      });
+
+      photoDropZone.addEventListener('dragleave', () => {
+        photoDropZone.classList.remove('dragover');
+      });
+
+      photoDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        photoDropZone.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (ev) => setPhotoPreview(ev.target.result);
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+
+    if (btnReplacePhoto && photoFile) {
+      btnReplacePhoto.addEventListener('click', (e) => {
+        e.stopPropagation();
+        photoFile.click();
+      });
+    }
+
+    if (btnRemovePhoto) {
+      btnRemovePhoto.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearPhotoPreview();
+      });
+    }
+
+    if (btnUseDemoPhoto) {
+      btnUseDemoPhoto.addEventListener('click', () => {
+        const demoPhoto = 'https://images.unsplash.com/photo-1544027993-37dbfe43562a?auto=format&fit=crop&w=800&q=80';
+        setPhotoPreview(demoPhoto);
+        showToast('Прикреплена демонстрационная фотография отряда ПСО', 'info');
+      });
+    }
+
+    if (formCloseSearch) {
+      formCloseSearch.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const markerId = document.getElementById('closeMarkerId').value;
+        const targetStatus = document.getElementById('closeMarkerTargetStatus').value;
+        const photoData = document.getElementById('closeMarkerPhotoData').value;
+        const note = document.getElementById('closeMarkerNote').value.trim();
+
+        if (!photoData) {
+          showToast('Пожалуйста, прикрепите подтверждающую фотографию', 'error');
+          return;
+        }
+
+        const user = store.getCurrentUser();
+        store.requestMarkerClose(markerId, {
+          photo: photoData,
+          note: note,
+          targetStatus: targetStatus,
+          submittedBy: user ? user.id : 'vol-1',
+          submittedByName: user ? `${user.firstName} ${user.lastName}` : 'Волонтёр отряда'
+        });
+
+        modalCloseSearch.classList.remove('open');
+        formCloseSearch.reset();
+        clearPhotoPreview();
+
+        showToast('Отчёт с фото направлен администратору на согласование!');
+        renderMapMarkers();
+        renderMapStats();
+        renderMapSidebar();
+        if (store.getCurrentRole() === 'ADMIN') {
+          renderAdminView();
+        }
+      });
+    }
+
+    document.querySelectorAll('[data-close-modal-search]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (modalCloseSearch) modalCloseSearch.classList.remove('open');
+      });
+    });
+
+    if (modalCloseSearch) {
+      modalCloseSearch.addEventListener('click', (e) => {
+        if (e.target === modalCloseSearch) modalCloseSearch.classList.remove('open');
+      });
+    }
+  }
+
+  // ==========================================
+  // МОДАЛЬНОЕ ОКНО ПРОСМОТРА ФОТО В ПОЛНОМ РАЗМЕРЕ
+  // ==========================================
+  window._zoomPhoto = function(photoUrl, title, caption) {
+    const modal = document.getElementById('modalPhotoZoom');
+    const img = document.getElementById('zoomPhotoImg');
+    const titleEl = document.getElementById('zoomPhotoTitle');
+    const captionEl = document.getElementById('zoomPhotoCaption');
+
+    if (!modal || !img) return;
+
+    try {
+      img.src = decodeURIComponent(photoUrl);
+    } catch(e) {
+      img.src = photoUrl;
+    }
+
+    if (titleEl) {
+      try {
+        titleEl.textContent = decodeURIComponent(title);
+      } catch(e) {
+        titleEl.textContent = title || 'Фотоотчёт поисково-спасательной работы';
+      }
+    }
+
+    if (captionEl) {
+      let decodedCaption = '';
+      try {
+        decodedCaption = decodeURIComponent(caption);
+      } catch(e) {
+        decodedCaption = caption || '';
+      }
+      captionEl.textContent = decodedCaption || 'Подтверждающий фотоотчёт добровольческого поискового отряда.';
+    }
+
+    modal.classList.add('open');
+  };
+
+  const btnClosePhotoZoom = document.getElementById('btnClosePhotoZoom');
+  const modalPhotoZoom = document.getElementById('modalPhotoZoom');
+  if (btnClosePhotoZoom && modalPhotoZoom) {
+    btnClosePhotoZoom.addEventListener('click', () => modalPhotoZoom.classList.remove('open'));
+    modalPhotoZoom.addEventListener('click', (e) => {
+      if (e.target === modalPhotoZoom) modalPhotoZoom.classList.remove('open');
+    });
+  }
+
   // Глобальные функции для кнопок в popup
   window._mapMarkFound = function(markerId) {
+    const m = (store.getMapMarkers('ALL') || []).find(x => x.id === markerId);
+    if (m && m.type === 'SEARCH_RESCUE') {
+      openCloseSearchMarkerModal(markerId, 'FOUND');
+      return;
+    }
     store.updateMarkerStatus(markerId, 'FOUND');
-    showToast('🎉 Человек найден! Статус метки обновлён.');
+    showToast('Человек найден! Статус метки обновлён.');
     const popup = document.getElementById('svgMarkerPopup');
     if (popup) popup.style.display = 'none';
     renderMapMarkers();
@@ -1499,6 +1994,11 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   window._mapCloseMarker = function(markerId) {
+    const m = (store.getMapMarkers('ALL') || []).find(x => x.id === markerId);
+    if (m && m.type === 'SEARCH_RESCUE') {
+      openCloseSearchMarkerModal(markerId, 'CLOSED');
+      return;
+    }
     store.updateMarkerStatus(markerId, 'CLOSED');
     showToast('Метка закрыта.');
     const popup = document.getElementById('svgMarkerPopup');
@@ -1574,7 +2074,7 @@ document.addEventListener('DOMContentLoaded', () => {
     e.target.reset();
 
     const typeText = type === 'SEARCH_RESCUE' ? 'Поисково-спасательная метка' : 'Волонтёрская метка';
-    showToast(`📍 ${typeText} «${newMarker.title}» размещена на карте!`);
+    showToast(`${typeText} «${newMarker.title}» размещена на карте!`);
 
     // Обновляем карту и летим к новой метке
     renderMapMarkers();
@@ -1587,6 +2087,9 @@ document.addEventListener('DOMContentLoaded', () => {
       openSvgMarkerPopup(newMarker.id, pt.x, pt.y);
     }
   });
+
+  // Initialize Search Marker modal handlers
+  initModalCloseSearchMarker();
 
   // ==========================================
   // 7. AUTH & PERSONAL ACCOUNT (ЛИЧНЫЙ КАБИНЕТ)
@@ -1615,7 +2118,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ${ICONS.logout} <span>Выйти</span>
         </button>
         <button class="btn-secondary-sm" id="btnResetData" title="Сбросить к исходным демонстрационным данным">
-          🔄 <span>Сброс</span>
+          ${ICONS.refresh} <span>Сброс</span>
         </button>
       `;
 
@@ -1636,7 +2139,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ${ICONS.plus} <span>Регистрация</span>
         </button>
         <button class="btn-secondary-sm" id="btnResetData" title="Сбросить к исходным демонстрационным данным">
-          🔄 <span>Сброс</span>
+          ${ICONS.refresh} <span>Сброс</span>
         </button>
       `;
 
@@ -1678,13 +2181,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const roleBadge = document.getElementById('profileRoleBadge');
     if (user.role === 'ADMIN') {
       roleBadge.className = 'badge badge-accepted';
-      roleBadge.textContent = '🔑 Администратор сервиса';
+      roleBadge.textContent = 'Администратор сервиса';
     } else if (user.role === 'ORGANIZER') {
       roleBadge.className = 'badge badge-confirmed';
-      roleBadge.textContent = '🏢 Организатор событий';
+      roleBadge.textContent = 'Организатор событий';
     } else {
       roleBadge.className = 'badge badge-pending';
-      roleBadge.textContent = '🙋 Волонтёр ДГТУ';
+      roleBadge.textContent = 'Волонтёр ДГТУ';
     }
 
     document.getElementById('profileCreatedAt').textContent =
@@ -1724,7 +2227,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div style="background: var(--slate-50); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1rem; font-size: 0.85rem;">
           <div style="font-weight: 700; color: var(--slate-900); margin-bottom: 0.4rem;">Полномочия Администратора платформы</div>
           <div style="color: var(--slate-600); line-height: 1.5;">
-            Главный координатор волонтёрских инициатив университета. Доступны: модерация событий, регистрация организаций и волонтёров, системный аудит и экспорт выписок.
+            Главный координатор волонтёрских инициатив университета. Доступны: модерация событий, согласование фотоотчётов ПСО, регистрация организаций и волонтёров, системный аудит и экспорт выписок.
           </div>
         </div>
       `;
@@ -1756,7 +2259,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const token = store.getJWTToken();
       if (token) {
         navigator.clipboard.writeText(token).then(() => {
-          showToast('📋 JWT токен скопирован в буфер обмена!');
+          showToast('JWT токен скопирован в буфер обмена!');
         }).catch(() => {
           showToast('Токен: ' + token.substring(0, 20) + '...', 'info');
         });
@@ -1806,7 +2309,7 @@ document.addEventListener('DOMContentLoaded', () => {
       formRegister.reset();
 
       const roleRu = role === 'ADMIN' ? 'Администратора' : role === 'ORGANIZER' ? 'Организатора' : 'Волонтёра';
-      showToast(`🎉 Аккаунт ${roleRu} успешно создан! JWT токен выдан.`);
+      showToast(`Аккаунт ${roleRu} успешно создан! JWT токен выдан.`);
 
       renderAuthHeader();
       setRole(role);
@@ -1831,7 +2334,7 @@ document.addEventListener('DOMContentLoaded', () => {
       modalLogin.classList.remove('open');
       formLogin.reset();
 
-      showToast(`👋 Добро пожаловать, ${res.user.firstName}! Авторизация по JWT успешна.`);
+      showToast(`Добро пожаловать, ${res.user.firstName}! Авторизация по JWT успешна.`);
 
       renderAuthHeader();
       setRole(res.user.role);

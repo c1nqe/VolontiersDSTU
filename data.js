@@ -343,14 +343,22 @@ const INITIAL_DATA = {
       type: 'SEARCH_RESCUE',
       title: 'Поиск: Белов В.Н., 83 года',
       description: 'Дедушка с деменцией пропал с территории частного дома на Левенцовке. Приметы: невысокий, седые волосы, ходит с тростью, одет в коричневый пиджак.',
-      status: 'ACTIVE',
+      status: 'PENDING_APPROVAL',
       urgency: 'HIGH',
       contactPhone: '+7 (863) 267-00-02',
       createdBy: 'vol-3',
       createdByName: 'Сидоров Денис Олегович',
       createdAt: '2026-09-24T07:15:00',
       lastSeenDate: '2026-09-24',
-      lastSeenLocation: 'мкр. Левенцовский, ул. Ленточная, 8'
+      lastSeenLocation: 'мкр. Левенцовский, ул. Ленточная, 8',
+      closureProof: {
+        photo: 'https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=600&q=80',
+        note: 'Мужчина успешно обнаружен патрулём ПСО «Горящие сердца» в лесопарковой зоне у водоёма. Состояние удовлетворительное, передан медикам и родственникам.',
+        targetStatus: 'FOUND',
+        submittedBy: 'vol-3',
+        submittedByName: 'Сидоров Денис Олегович',
+        submittedAt: '2026-09-24T18:45:00'
+      }
     }
   ]
 };
@@ -747,6 +755,12 @@ class DataStore {
   getMapMarkers(filterType = 'ALL') {
     const markers = this.data.mapMarkers || [];
     if (filterType === 'ALL') return markers;
+    if (filterType === 'PENDING_APPROVAL') {
+      return markers.filter(m => m.status === 'PENDING_APPROVAL');
+    }
+    if (filterType === 'FOUND') {
+      return markers.filter(m => m.status === 'FOUND');
+    }
     return markers.filter(m => m.type === filterType);
   }
 
@@ -774,6 +788,52 @@ class DataStore {
       return marker;
     }
     return null;
+  }
+
+  requestMarkerClose(markerId, closureData = {}) {
+    const marker = (this.data.mapMarkers || []).find(m => m.id === markerId);
+    if (!marker) return null;
+    marker.status = 'PENDING_APPROVAL';
+    marker.closureProof = {
+      photo: closureData.photo || '',
+      note: closureData.note || '',
+      targetStatus: closureData.targetStatus || 'FOUND',
+      submittedBy: closureData.submittedBy || 'unknown',
+      submittedByName: closureData.submittedByName || 'Волонтёр отряда',
+      submittedAt: new Date().toISOString()
+    };
+    this.save();
+    return marker;
+  }
+
+  approveMarkerClose(markerId, adminId = 'adm-1', adminName = 'Администратор сервиса') {
+    const marker = (this.data.mapMarkers || []).find(m => m.id === markerId);
+    if (!marker) return null;
+    const targetStatus = (marker.closureProof && marker.closureProof.targetStatus) || 'FOUND';
+    marker.status = targetStatus;
+    if (marker.closureProof) {
+      marker.closureProof.approvedAt = new Date().toISOString();
+      marker.closureProof.approvedBy = adminName;
+      marker.closureProof.approvedById = adminId;
+    }
+    this.save();
+    return marker;
+  }
+
+  rejectMarkerClose(markerId, reason = 'Недостаточно подтверждающих материалов') {
+    const marker = (this.data.mapMarkers || []).find(m => m.id === markerId);
+    if (!marker) return null;
+    marker.status = 'ACTIVE';
+    if (marker.closureProof) {
+      marker.closureProof.rejectedAt = new Date().toISOString();
+      marker.closureProof.rejectReason = reason;
+    }
+    this.save();
+    return marker;
+  }
+
+  getPendingMarkerApprovals() {
+    return (this.data.mapMarkers || []).filter(m => m.status === 'PENDING_APPROVAL');
   }
 
   deleteMarker(markerId) {
