@@ -70,7 +70,8 @@ PENDING → ACCEPTED / CANCELLED → CONFIRMED
 
 | Компонент | Технология |
 |-----------|-----------|
-| **Frontend** | React / Vue.js / Angular (на выбор команды) |
+| **Frontend** | React 18 + Vite 5, react-leaflet (карта) |
+| **Тесты** | Vitest + jsdom |
 | **Backend** | [DataSpace Community Edition](https://gitverse.ru/sbertech/dataspace-ce) |
 | **API** | GraphQL |
 | **Генератор** | [simple-ds-gql-generator](https://gitverse.ru/bvvmail/simple-ds-gql-generator) — генератор шаблонного приложения на базе GraphQL-схемы |
@@ -146,48 +147,58 @@ PENDING → ACCEPTED / CANCELLED → CONFIRMED
 
 ---
 
-## 🗂 Структура проекта (планируемая)
+## 🗂 Структура проекта
 
 ```
 VolontiersDSTU/
-├── public/                  # Статические ресурсы
+├── index.html               # Точка входа Vite
+├── vite.config.js           # Сборка, dev-сервер (порт 3000), настройки Vitest
+├── public/favicon.svg
 ├── src/
-│   ├── api/                 # GraphQL запросы и мутации
-│   ├── components/          # Переиспользуемые компоненты
-│   │   ├── common/          # Общие UI-компоненты
-│   │   ├── admin/           # Компоненты администратора
-│   │   ├── organizer/       # Компоненты организатора
-│   │   └── volunteer/       # Компоненты волонтёра
-│   ├── layouts/             # Макеты страниц
-│   ├── pages/               # Страницы приложения
-│   ├── router/              # Маршрутизация
-│   ├── store/               # Управление состоянием
-│   ├── utils/               # Утилиты
-│   └── App.jsx              # Корневой компонент
-├── docs/                    # Документация
-├── README.md
-├── package.json
-└── .gitignore
+│   ├── main.jsx             # Монтирование React
+│   ├── App.jsx              # Навигация по разделам и ролям
+│   ├── api/graphqlClient.js # Клиент DataSpace CE (mock / remote)
+│   ├── store/               # DataStore (localStorage + подписки), seed-данные, JWT
+│   ├── components/          # Общие компоненты: шапка, модалки, карточки, звёзды, загрузка фото
+│   ├── views/               # Витрина, кабинеты админа / организатора / волонтёра, карта
+│   ├── modals/              # Вход, регистрация, профиль, события, метки, ПСО, отзывы
+│   ├── map/                 # Leaflet-карта и карточка метки
+│   ├── utils/               # Форматирование, сжатие изображений
+│   └── styles/index.css
+├── tests/
+│   ├── store.test.js        # Vitest: отзывы, фото меток, откат при переполнении, GraphQL
+│   └── legacy-suite.cjs     # Исходный набор проверок жизненных циклов
+├── schema.graphql           # Схема (включая EventReview и MapMarker с photos)
+└── operations.graphql       # Операции клиента
 ```
+
+## ✨ Возможности
+
+- **Роли:** гость, волонтёр, организатор, администратор; вход по JWT (демо-подпись).
+- **События:** модерация, заявки, подтверждение часов, выписка для печати.
+- **Отзывы о мероприятиях:** оценка 1–5 и текст. Оставить отзыв может участник, у которого подтверждены часы или который принят на закрытое событие. Один отзыв на человека, его можно изменить или удалить; администратор модерирует отзывы.
+- **Карта ПСО:** к поисково-спасательной метке можно прикрепить до 5 фото (выбор, перетаскивание, вставка из буфера). Снимки сжимаются до 1280 px; при нехватке места в `localStorage` метка не сохраняется частично.
+- **Закрытие ПСО:** фотоотчёт и рапорт уходят администратору на согласование.
 
 ---
 
 ## 🚀 Быстрый старт
 
+Требуется Node.js 18+.
+
 ```bash
-# Клонирование репозитория
 git clone https://github.com/c1nqe/VolontiersDSTU.git
 cd VolontiersDSTU
+git checkout dev-v.01
 
-# Установка зависимостей
 npm install
-
-# Запуск в режиме разработки
-npm run dev
-
-# Сборка для продакшена
-npm run build
+npm run dev       # http://localhost:3000
+npm test          # Vitest + исходный набор проверок
+npm run build     # production-сборка в dist/
+npm run preview   # просмотр сборки
 ```
+
+Демо-аккаунты: `admin@donstu.ru / admin123`, `organizer@donstu.ru / org123`, `volunteer@donstu.ru / vol123`. Кнопка ⟳ в шапке сбрасывает данные к исходным.
 
 ---
 
