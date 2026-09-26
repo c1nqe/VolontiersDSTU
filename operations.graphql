@@ -279,3 +279,74 @@ query GetVolunteerStatement($volonteerId: ID!, $startDate: String!, $endDate: St
     }
   }
 }
+
+
+# ------------------------------------------------------------------------------
+# ОТЗЫВЫ О МЕРОПРИЯТИЯХ
+# ------------------------------------------------------------------------------
+
+query GetEventReviews($eventId: ID!) {
+  eventReviews(eventId: $eventId) {
+    id
+    authorName
+    rating
+    text
+    createdAt
+    updatedAt
+  }
+}
+
+mutation SubmitEventReview(
+  $eventId: ID!
+  $volonteerId: ID!
+  $rating: Int!
+  $text: String!
+) {
+  submitEventReview(
+    eventId: $eventId
+    volonteerId: $volonteerId
+    rating: $rating
+    text: $text
+  ) {
+    id
+    rating
+    text
+    createdAt
+    updatedAt
+  }
+}
+
+mutation DeleteEventReview($reviewId: ID!) {
+  deleteEventReview(reviewId: $reviewId)
+}
+
+# ------------------------------------------------------------------------------
+# КАРТА: МЕТКИ ПСО С ФОТОГРАФИЯМИ
+# ------------------------------------------------------------------------------
+
+query GetMapMarkers($type: MapMarkerType) {
+  mapMarkers(type: $type) {
+    id
+    type
+    status
+    title
+    lat
+    lng
+    urgency
+    photos
+    closureProof {
+      photo
+      note
+      targetStatus
+    }
+  }
+}
+
+mutation CreateMapMarker($input: MapMarkerInput!) {
+  createMapMarker(input: $input) {
+    id
+    status
+    photos
+    createdAt
+  }
+}

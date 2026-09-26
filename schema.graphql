@@ -76,6 +76,9 @@ type Event {
   organization: Organization!
   requests: [VolonteerEventRequest!]
   createdAt: String!
+  reviews: [EventReview!]
+  ratingAvg: Float    # Средняя оценка по отзывам
+  reviewsCount: Int!
 }
 
 type VolonteerEventRequest {
@@ -90,6 +93,83 @@ type VolonteerEventRequest {
   rejectionReason: String
   createdAt: String!
   updatedAt: String!
+}
+
+# Отзыв волонтёра о проведённом мероприятии (1 отзыв на участника)
+type EventReview {
+  id: ID!
+  eventId: ID!
+  event: Event!
+  volonteerId: ID!
+  volonteer: Volonteer!
+  authorName: String!
+  rating: Int! # 1..5
+  text: String!
+  createdAt: String!
+  updatedAt: String
+}
+
+enum MapMarkerType {
+  REGULAR        # Волонтёрская помощь
+  SEARCH_RESCUE  # Поисково-спасательная операция (ПСО)
+}
+
+enum MapMarkerStatus {
+  ACTIVE
+  PENDING_APPROVAL # Отчёт о закрытии ПСО на согласовании
+  FOUND
+  CLOSED
+}
+
+enum Urgency {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+type ClosureProof {
+  photo: String!
+  note: String!
+  targetStatus: MapMarkerStatus!
+  submittedBy: ID!
+  submittedByName: String!
+  submittedAt: String!
+  approvedAt: String
+  approvedBy: String
+  rejectedAt: String
+  rejectReason: String
+}
+
+type MapMarker {
+  id: ID!
+  type: MapMarkerType!
+  status: MapMarkerStatus!
+  title: String!
+  description: String!
+  lat: Float!
+  lng: Float!
+  urgency: Urgency!
+  contactPhone: String
+  lastSeenDate: String
+  lastSeenLocation: String
+  photos: [String!]! # Фото, прикреплённые при создании метки ПСО (до 5, URL или data URL)
+  closureProof: ClosureProof
+  createdBy: ID!
+  createdByName: String!
+  createdAt: String!
+}
+
+input MapMarkerInput {
+  type: MapMarkerType!
+  title: String!
+  description: String!
+  lat: Float!
+  lng: Float!
+  urgency: Urgency!
+  contactPhone: String
+  lastSeenDate: String
+  lastSeenLocation: String
+  photos: [String!]
 }
 
 type StatementReport {
@@ -129,6 +209,10 @@ type Query {
 
   # Выписка об отработанных часах на закрытых событиях (CONFIRMED) за период
   volonteerStatement(volonteerId: ID!, startDate: String!, endDate: String!): StatementReport!
+
+  # Отзывы и карта
+  eventReviews(eventId: ID!): [EventReview!]!
+  mapMarkers(type: MapMarkerType): [MapMarker!]!
 }
 
 # Mutations
@@ -207,4 +291,23 @@ type Mutation {
   cancelEventRequest(
     requestId: ID!
   ): VolonteerEventRequest!
+
+  # Отзыв участника (создаёт или обновляет собственный отзыв).
+  # Доступно, если заявка CONFIRMED или ACCEPTED на закрытом событии.
+  submitEventReview(
+    eventId: ID!
+    volonteerId: ID!
+    rating: Int!
+    text: String!
+  ): EventReview!
+
+  # Администратор (модерация) или автор отзыва
+  deleteEventReview(
+    reviewId: ID!
+  ): Boolean!
+
+  # Карта: метка с фотографиями (фото принимаются только для SEARCH_RESCUE)
+  createMapMarker(
+    input: MapMarkerInput!
+  ): MapMarker!
 }
