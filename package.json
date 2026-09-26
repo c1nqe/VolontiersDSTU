@@ -1,21 +1,29 @@
 {
   "name": "volontiers-dstu",
-  "version": "0.3.0",
-  "description": "Frontend-приложение «Учет волонтеров» для ДГТУ (Хакатон ВЕСНА '25)",
-  "main": "serve.js",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Frontend-приложение «Учет волонтеров» для ДГТУ (Хакатон ВЕСНА '25) на React",
   "scripts": {
-    "start": "node serve.js",
-    "dev": "node serve.js",
-    "test": "node test-suite.js"
+    "dev": "vite",
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run && node tests/legacy-suite.cjs"
   },
-  "keywords": [
-    "volunteers",
-    "dstu",
-    "hackathon",
-    "graphql",
-    "dataspace-ce",
-    "jwt"
-  ],
+  "keywords": ["volunteers", "dstu", "hackathon", "graphql", "dataspace-ce", "jwt", "react"],
   "author": "c1nqe",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9"
+  }
 }
