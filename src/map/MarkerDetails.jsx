@@ -47,14 +47,14 @@ export default function MarkerDetails({ marker, onAfterAction }) {
       {photos.length > 0 && (
         <div className="popup-gallery">
           <button type="button" className="popup-gallery-cover" onClick={() => openLightbox(photos, { title: marker.title, caption: marker.description })}>
-            <img src={photos[0]} alt={`Фото: ${marker.title}`} />
+            <img loading="lazy" decoding="async" src={photos[0]} alt={`Фото: ${marker.title}`} />
             {photos.length > 1 && <span className="popup-gallery-count"><Icon name="image" /> {photos.length}</span>}
           </button>
           {photos.length > 1 && (
             <div className="popup-gallery-strip">
               {photos.slice(1, 4).map((src, i) => (
                 <button key={i} type="button" onClick={() => openLightbox(photos, { index: i + 1, title: marker.title, caption: marker.description })}>
-                  <img src={src} alt={`Фото ${i + 2}`} />
+                  <img loading="lazy" decoding="async" src={src} alt={`Фото ${i + 2}`} />
                 </button>
               ))}
             </div>
@@ -71,7 +71,7 @@ export default function MarkerDetails({ marker, onAfterAction }) {
         <div className="popup-proof">
           <div className="popup-proof-title"><Icon name="camera" /> Фотоотчёт о завершении</div>
           <button type="button" className="popup-proof-photo" onClick={() => openLightbox(proof.photo, { title: marker.title, caption: proof.note })}>
-            <img src={proof.photo} alt="Фотоотчёт" />
+            <img loading="lazy" decoding="async" src={proof.photo} alt="Фотоотчёт" />
           </button>
           {proof.note && <div className="popup-proof-note">«{proof.note}»</div>}
         </div>

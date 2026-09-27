@@ -184,3 +184,31 @@ describe('GraphQL-клиент (mock-режим)', () => {
     expect(list.data.eventReviews).toHaveLength(3);
   });
 });
+
+describe('кэш производных данных', () => {
+  it('возвращает тот же объект до изменения и пересчитывает после', () => {
+    const store = new DataStore(memoryStorage());
+    const first = store.getEvents();
+    expect(store.getEvents()).toBe(first);
+    store.updateEventStatus('evt-4', 'ACCEPTED');
+    const second = store.getEvents();
+    expect(second).not.toBe(first);
+    expect(second.find((e) => e.id === 'evt-4').status).toBe('ACCEPTED');
+  });
+
+  it('сбрасывает кэш при откате неудачного сохранения', () => {
+    const store = new DataStore(memoryStorage(40_000));
+    const before = store.getMapMarkers().length;
+    store.addMapMarker({ type: 'SEARCH_RESCUE', title: 'x', description: 'x', lat: 1, lng: 1, urgency: 'HIGH', photos: ['data:' + 'C'.repeat(60_000)] });
+    expect(store.getEvents().length).toBe(5);
+    expect(store.getMapMarkers().length).toBe(before);
+  });
+
+  it('пересчитывает рейтинг после нового отзыва', () => {
+    const store = new DataStore(memoryStorage());
+    expect(store.getEvent('evt-1').ratingAvg).toBe(4.5);
+    store.saveEventReview({ eventId: 'evt-1', volonteerId: 'vol-1', rating: 1, text: 'Очень плохо организовано' });
+    expect(store.getEvent('evt-1').ratingAvg).toBe(3.3);
+    expect(store.getEventReviews('evt-1')[0].volonteerId).toBe('vol-1');
+  });
+});

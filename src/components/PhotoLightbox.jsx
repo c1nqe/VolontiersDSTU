@@ -50,7 +50,7 @@ export default function PhotoLightbox() {
           <div className="lightbox-strip">
             {photos.map((src, i) => (
               <button key={i} type="button" className={i === index ? 'active' : ''} onClick={() => setLightbox({ ...lightbox, index: i })}>
-                <img src={src} alt={`Миниатюра ${i + 1}`} />
+                <img loading="lazy" decoding="async" src={src} alt={`Миниатюра ${i + 1}`} />
               </button>
             ))}
           </div>

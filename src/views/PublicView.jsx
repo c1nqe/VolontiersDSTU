@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useDeferredValue, useState } from 'react';
 import Icon from '../components/Icon.jsx';
 import EventCard from '../components/EventCard.jsx';
 import { EmptyState, SectionHeader } from '../components/Common.jsx';
@@ -20,7 +20,7 @@ export default function PublicView() {
   const events = store.getEvents();
   const accepted = events.filter((e) => e.status === 'ACCEPTED');
   const closed = events.filter((e) => e.status === 'CLOSED');
-  const q = query.toLowerCase().trim();
+  const q = useDeferredValue(query).toLowerCase().trim();
   const filtered = accepted.filter((e) => matches(e, q));
   const filteredClosed = closed.filter((e) => matches(e, q));
   const totalHours = accepted.reduce((acc, e) => acc + (e.plannedHours || 0), 0);
@@ -117,9 +117,10 @@ export default function PublicView() {
                 key={evt.id}
                 event={evt}
                 footerInfo={<><Icon name="users" /> Участвовали: {evt.approvedVolunteersCount || 0}</>}
+                latestReview={store.getEventReviews(evt.id)[0]}
                 actions={(
                   <button type="button" className="btn btn-outline btn-sm" onClick={() => openModal('reviews', { eventId: evt.id })}>
-                    <Icon name="message" /> Отзывы
+                    <Icon name="message" /> Все отзывы
                   </button>
                 )}
                 onShowReviews={(e) => openModal('reviews', { eventId: e.id })}

@@ -117,7 +117,7 @@ export default function MapView() {
                 className={`marker-list-card ${border}`}
                 onClick={() => setFocus({ id: m.id, lat: m.lat, lng: m.lng, ts: Date.now() })}
               >
-                {m.photos?.[0] && <img className="marker-list-thumb" src={m.photos[0]} alt="" />}
+                {m.photos?.[0] && <img loading="lazy" decoding="async" className="marker-list-thumb" src={m.photos[0]} alt="" />}
                 <div className="marker-list-body">
                   <div className="row-between">
                     <div className="row-gap">

@@ -15,6 +15,7 @@ export class DataStore {
     this.storage = storage;
     this.listeners = new Set();
     this.version = 0;
+    this.cache = new Map();
     this.data = this.load();
   }
 
@@ -29,8 +30,20 @@ export class DataStore {
   getVersion = () => this.version;
 
   emit() {
+    this.cache.clear();
     this.version += 1;
     this.listeners.forEach((l) => l());
+  }
+
+  /**
+   * Кэш производных данных до следующего изменения стора.
+   * Компоненты вызывают getEvents()/getRequests() много раз за отрисовку —
+   * теперь тяжёлые вычисления выполняются один раз на версию данных.
+   * Возвращаемые массивы нельзя мутировать.
+   */
+  memo(key, compute) {
+    if (!this.cache.has(key)) this.cache.set(key, compute());
+    return this.cache.get(key);
   }
 
   // ============================================
@@ -90,6 +103,7 @@ export class DataStore {
     const result = mutator(this.data);
     if (!this.persist()) {
       this.data = JSON.parse(snapshot);
+      this.cache.clear();
       return { ok: false, result: null };
     }
     this.emit();
@@ -97,6 +111,7 @@ export class DataStore {
   }
 
   reset() {
+    this.cache.clear();
     this.storage?.removeItem(STORAGE_KEY);
     this.data = clone(INITIAL_DATA);
     this.normalize(this.data);
@@ -260,11 +275,12 @@ export class DataStore {
   }
 
   getVolunteers() {
-    return this.data.volunteers.map((vol) => {
-      const confirmedHours = this.data.requests
-        .filter((r) => r.volonteerId === vol.id && r.status === 'CONFIRMED')
-        .reduce((sum, r) => sum + (Number(r.confirmedHours) || 0), 0);
-      return { ...vol, totalConfirmedHours: confirmedHours };
+    return this.memo('volunteers', () => {
+      const hours = new Map();
+      this.data.requests.forEach((r) => {
+        if (r.status === 'CONFIRMED') hours.set(r.volonteerId, (hours.get(r.volonteerId) || 0) + (Number(r.confirmedHours) || 0));
+      });
+      return this.data.volunteers.map((vol) => ({ ...vol, totalConfirmedHours: hours.get(vol.id) || 0 }));
     });
   }
 
@@ -279,19 +295,32 @@ export class DataStore {
   // События
   // ============================================
   getEvents() {
-    return this.data.events.map((evt) => {
-      const org = this.data.organizations.find((o) => o.id === evt.organizationId);
-      const eventRequests = this.data.requests.filter((r) => r.eventId === evt.id);
-      const rating = this.getEventRating(evt.id);
-      return {
-        ...evt,
-        organizationName: org ? org.name : 'Неизвестная организация',
-        requestsCount: eventRequests.length,
-        approvedVolunteersCount: eventRequests.filter((r) => r.status === 'ACCEPTED' || r.status === 'CONFIRMED').length,
-        ratingAvg: rating.avg,
-        reviewsCount: rating.count,
-      };
+    return this.memo('events', () => {
+      const orgNames = new Map(this.data.organizations.map((o) => [o.id, o.name]));
+      const counts = new Map();
+      this.data.requests.forEach((r) => {
+        const c = counts.get(r.eventId) || { total: 0, approved: 0 };
+        c.total += 1;
+        if (r.status === 'ACCEPTED' || r.status === 'CONFIRMED') c.approved += 1;
+        counts.set(r.eventId, c);
+      });
+      return this.data.events.map((evt) => {
+        const c = counts.get(evt.id) || { total: 0, approved: 0 };
+        const rating = this.getEventRating(evt.id);
+        return {
+          ...evt,
+          organizationName: orgNames.get(evt.organizationId) || 'Неизвестная организация',
+          requestsCount: c.total,
+          approvedVolunteersCount: c.approved,
+          ratingAvg: rating.avg,
+          reviewsCount: rating.count,
+        };
+      });
     });
+  }
+
+  getEvent(eventId) {
+    return this.getEvents().find((e) => e.id === eventId) || null;
   }
 
   addEvent(eventData) {
@@ -313,20 +342,25 @@ export class DataStore {
   // Заявки
   // ============================================
   getRequests() {
-    return this.data.requests.map((req) => {
-      const vol = this.data.volunteers.find((v) => v.id === req.volonteerId);
-      const evt = this.data.events.find((e) => e.id === req.eventId);
-      const org = evt ? this.data.organizations.find((o) => o.id === evt.organizationId) : null;
-      return {
-        ...req,
-        volonteerName: vol ? vol.fullName : 'Неизвестный волонтер',
-        volonteerFaculty: vol ? vol.faculty : '',
-        volonteerStudentId: vol ? vol.studentId : '',
-        eventTitle: evt ? evt.title : 'Неизвестное событие',
-        eventDate: evt ? evt.startDate : '',
-        eventStatus: evt ? evt.status : '',
-        organizationName: org ? org.name : '',
-      };
+    return this.memo('requests', () => {
+      const vols = new Map(this.data.volunteers.map((v) => [v.id, v]));
+      const events = new Map(this.data.events.map((e) => [e.id, e]));
+      const orgs = new Map(this.data.organizations.map((o) => [o.id, o]));
+      return this.data.requests.map((req) => {
+        const vol = vols.get(req.volonteerId);
+        const evt = events.get(req.eventId);
+        const org = evt ? orgs.get(evt.organizationId) : null;
+        return {
+          ...req,
+          volonteerName: vol ? vol.fullName : 'Неизвестный волонтер',
+          volonteerFaculty: vol ? vol.faculty : '',
+          volonteerStudentId: vol ? vol.studentId : '',
+          eventTitle: evt ? evt.title : 'Неизвестное событие',
+          eventDate: evt ? evt.startDate : '',
+          eventStatus: evt ? evt.status : '',
+          organizationName: org ? org.name : '',
+        };
+      });
     });
   }
 
@@ -403,14 +437,33 @@ export class DataStore {
   // ============================================
   // Отзывы о мероприятиях
   // ============================================
+  /** Все отзывы, сгруппированные по мероприятию (новые сверху). */
+  getReviewsByEvent() {
+    return this.memo('reviewsByEvent', () => {
+      const map = new Map();
+      (this.data.eventReviews || [])
+        .slice()
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .forEach((r) => {
+          if (!map.has(r.eventId)) map.set(r.eventId, []);
+          map.get(r.eventId).push(r);
+        });
+      return map;
+    });
+  }
+
   getEventReviews(eventId) {
-    return (this.data.eventReviews || [])
-      .filter((r) => r.eventId === eventId)
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return this.getReviewsByEvent().get(eventId) || [];
+  }
+
+  getAllReviews() {
+    return this.memo('allReviews', () => (this.data.eventReviews || [])
+      .slice()
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
   }
 
   getEventRating(eventId) {
-    const reviews = (this.data.eventReviews || []).filter((r) => r.eventId === eventId);
+    const reviews = this.getEventReviews(eventId);
     if (reviews.length === 0) return { avg: 0, count: 0 };
     const sum = reviews.reduce((acc, r) => acc + Number(r.rating || 0), 0);
     return { avg: Math.round((sum / reviews.length) * 10) / 10, count: reviews.length };

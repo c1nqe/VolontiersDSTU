@@ -1,5 +1,7 @@
 import Icon from './Icon.jsx';
-import { RatingSummary } from './StarRating.jsx';
+import { RatingPill } from './reviews/ReviewParts.jsx';
+import { shortName } from './reviews/reviewUtils.js';
+import { pluralize } from '../utils/format.js';
 import { EVENT_STATUS, formatDate } from '../utils/format.js';
 
 /**
@@ -15,6 +17,7 @@ export default function EventCard({
   footerInfo,
   actions,
   onShowReviews,
+  latestReview,
 }) {
   const status = EVENT_STATUS[event.status] || EVENT_STATUS.CREATED;
   const showRating = onShowReviews && (event.status === 'CLOSED' || event.reviewsCount > 0);
@@ -51,8 +54,20 @@ export default function EventCard({
 
       {showRating && (
         <div className="event-rating">
-          <RatingSummary avg={event.ratingAvg} count={event.reviewsCount} onClick={() => onShowReviews(event)} />
+          <RatingPill value={event.ratingAvg} />
+          <button type="button" className="link-btn" onClick={() => onShowReviews(event)}>
+            {event.reviewsCount
+              ? `${event.reviewsCount} ${pluralize(event.reviewsCount, 'отзыв', 'отзыва', 'отзывов')}`
+              : 'Оставить первый отзыв'}
+          </button>
         </div>
+      )}
+
+      {latestReview && (
+        <button type="button" className="event-quote" onClick={() => onShowReviews?.(event)}>
+          <span className="event-quote-text">{latestReview.text}</span>
+          <span className="event-quote-author">{shortName(latestReview.authorName)}</span>
+        </button>
       )}
 
       <footer className="event-footer">

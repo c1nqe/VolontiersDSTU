@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useDeferredValue, useState } from 'react';
 import Icon from '../components/Icon.jsx';
 import EventCard from '../components/EventCard.jsx';
 import { EmptyState, StatCard, StatsGrid, Tabs } from '../components/Common.jsx';
-import { StarDisplay } from '../components/StarRating.jsx';
+import { RatingPill } from '../components/reviews/ReviewParts.jsx';
 import { useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
 import { REQUEST_STATUS, formatDate } from '../utils/format.js';
@@ -21,16 +21,17 @@ export default function VolunteerView() {
   const [period, setPeriod] = useState({ start: '2026-09-01', end: '2026-10-31' });
   const [statementPeriod, setStatementPeriod] = useState(period);
 
+  const deferredQuery = useDeferredValue(query);
   const vol = store.getActiveVolunteer();
   if (!vol) return null;
 
   const events = store.getEvents();
-  const q = query.toLowerCase().trim();
+  const q = deferredQuery.toLowerCase().trim();
   const available = events
     .filter((e) => e.status === 'ACCEPTED')
     .filter((e) => !q || [e.title, e.description, e.location, e.organizationName].some((f) => f.toLowerCase().includes(q)));
   const myRequests = store.getRequests().filter((r) => r.volonteerId === vol.id);
-  const myReviews = (store.data.eventReviews || []).filter((r) => r.volonteerId === vol.id);
+  const myReviews = store.getAllReviews().filter((r) => r.volonteerId === vol.id);
   const reviewable = myRequests.filter((r) => store.canReviewEvent(vol.id, r.eventId).allowed);
   const awaitingReview = reviewable.filter((r) => !myReviews.some((rv) => rv.eventId === r.eventId));
 
@@ -117,7 +118,7 @@ export default function VolunteerView() {
                     <td>
                       {mine ? (
                         <div className="review-cell">
-                          <StarDisplay value={mine.rating} size={14} />
+                          <RatingPill value={mine.rating} size="sm" />
                           <button type="button" className="link-btn" onClick={() => openModal('reviews', { eventId: r.eventId, compose: true })}>Изменить</button>
                         </div>
                       ) : check.allowed ? (

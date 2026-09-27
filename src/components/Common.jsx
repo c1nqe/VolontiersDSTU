@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import Icon from './Icon.jsx';
 
 export function StatCard({ label, value, sub, tone, marker }) {
@@ -40,8 +41,20 @@ export function Badge({ className = '', children, icon }) {
  * Вкладки внутри рабочего места. tabs: [{ id, label, icon, count }]
  */
 export function Tabs({ tabs, active, onChange, className = '' }) {
+  const ref = useRef(null);
+  // На узком экране вкладки прокручиваются — держим активную в зоне видимости.
+  // Прокручиваем только сам ряд вкладок, не страницу.
+  useEffect(() => {
+    const list = ref.current;
+    const tab = list?.querySelector('[aria-selected="true"]');
+    if (!list || !tab) return;
+    const left = tab.offsetLeft - list.offsetLeft;
+    if (left < list.scrollLeft || left + tab.offsetWidth > list.scrollLeft + list.clientWidth) {
+      list.scrollTo({ left: Math.max(0, left - 16), behavior: 'smooth' });
+    }
+  }, [active]);
   return (
-    <div className={`tab-navigation no-print ${className}`} role="tablist">
+    <div ref={ref} className={`tab-navigation no-print ${className}`} role="tablist">
       {tabs.map((t) => (
         <button
           key={t.id}

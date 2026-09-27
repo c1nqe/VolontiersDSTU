@@ -75,7 +75,7 @@ export default function PhotoUploader({ photos, onChange, max = 5, hint, prompt,
                 onClick={() => openLightbox(photos, { index: idx, title: 'Предпросмотр фото' })}
                 aria-label={`Открыть фото ${idx + 1}`}
               >
-                <img src={src} alt={`Прикреплённое фото ${idx + 1}`} />
+                <img loading="lazy" decoding="async" src={src} alt={`Прикреплённое фото ${idx + 1}`} />
               </button>
               <button type="button" className="photo-thumb-remove" onClick={() => removeAt(idx)} aria-label={`Удалить фото ${idx + 1}`}>
                 <Icon name="cross" />

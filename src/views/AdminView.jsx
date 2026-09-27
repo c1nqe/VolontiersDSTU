@@ -2,10 +2,10 @@ import { useState } from 'react';
 import Icon from '../components/Icon.jsx';
 import EventCard from '../components/EventCard.jsx';
 import { EmptyState, Field, SectionHeader, StatCard, StatsGrid, Tabs } from '../components/Common.jsx';
-import { StarDisplay } from '../components/StarRating.jsx';
+import { ReviewCard } from '../components/reviews/ReviewParts.jsx';
 import { useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
-import { formatDate, pluralize } from '../utils/format.js';
+import { pluralize } from '../utils/format.js';
 
 const EMPTY_ORG = { name: '', contactPerson: '', inn: '', email: '', phone: '', description: '' };
 const EMPTY_VOL = { fullName: '', studentId: '', faculty: '', email: '', phone: '', birthDate: '' };
@@ -28,15 +28,14 @@ export default function AdminView() {
   const events = store.getEvents();
   const pendingEvents = events.filter((e) => e.status === 'CREATED');
   const pendingMarkers = store.getPendingMarkerApprovals();
-  const allReviews = (store.data.eventReviews || []).slice()
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const allReviews = store.getAllReviews();
   const eventTitle = (id) => events.find((e) => e.id === id)?.title || 'Мероприятие удалено';
   const admin = store.getCurrentUser();
 
   const tabs = [
     { id: 'moderation', label: 'Модерация событий', icon: 'shield', count: pendingEvents.length },
     { id: 'markers', label: 'Закрытие ПСО', icon: 'camera', count: pendingMarkers.length },
-    { id: 'reviews', label: 'Отзывы', icon: 'message' },
+    { id: 'reviews', label: 'Отзывы', icon: 'message', count: 0 },
     { id: 'reg-org', label: 'Новый организатор', icon: 'building' },
     { id: 'reg-vol', label: 'Новый волонтёр', icon: 'user' },
     { id: 'registry', label: 'Общий реестр', icon: 'fileText' },
@@ -117,7 +116,7 @@ export default function AdminView() {
                       className="admin-approval-photo-box"
                       onClick={() => openLightbox([proof.photo, ...(m.photos || [])], { title: m.title, caption: proof.note })}
                     >
-                      <img src={proof.photo} alt="Фотоотчёт" className="admin-approval-photo" />
+                      <img loading="lazy" decoding="async" src={proof.photo} alt="Фотоотчёт" className="admin-approval-photo" />
                       <span className="admin-approval-zoom-hint"><Icon name="search" /> Увеличить фото</span>
                     </button>
                     <div className="admin-approval-content">
@@ -159,21 +158,17 @@ export default function AdminView() {
           {allReviews.length === 0 ? (
             <EmptyState icon="message" title="Отзывов пока нет">Они появятся, когда участники закрытых мероприятий поделятся впечатлениями.</EmptyState>
           ) : (
-            <div className="review-list">
+            <div className="rv-grid">
               {allReviews.map((r) => (
-                <article key={r.id} className="review-item">
-                  <div className="review-item-head">
-                    <div>
-                      <button type="button" className="link-btn" onClick={() => openModal('reviews', { eventId: r.eventId })}>{eventTitle(r.eventId)}</button>
-                      <div className="review-author">{r.authorName}, {formatDate(r.createdAt)}</div>
-                    </div>
-                    <StarDisplay value={r.rating} />
-                  </div>
-                  <p className="review-text">{r.text}</p>
-                  <div className="review-item-actions">
+                <ReviewCard
+                  key={r.id}
+                  review={r}
+                  eventTitle={eventTitle(r.eventId)}
+                  onEventClick={() => openModal('reviews', { eventId: r.eventId })}
+                  actions={(
                     <button
                       type="button"
-                      className="btn btn-outline-danger btn-sm"
+                      className="link-btn danger"
                       onClick={() => {
                         if (window.confirm('Удалить этот отзыв? Действие нельзя отменить.')) {
                           store.deleteEventReview(r.id);
@@ -183,8 +178,8 @@ export default function AdminView() {
                     >
                       <Icon name="trash" /> Удалить
                     </button>
-                  </div>
-                </article>
+                  )}
+                />
               ))}
             </div>
           )}
