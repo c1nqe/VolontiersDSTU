@@ -13,6 +13,8 @@ impl Query {
     async fn me(&self, ctx: &Context<'_>) -> Result<Option<User>> { Ok(svc::me(ctx).await?) }
     /// Сессия: пользователь и срок действия.
     async fn session(&self, ctx: &Context<'_>) -> Result<Option<Session>> { Ok(svc::session(ctx).await?) }
+    /// Версия действующей политики обработки персональных данных.
+    async fn privacy_policy_version(&self) -> &'static str { svc::PRIVACY_POLICY_VERSION }
     /// Список учётных записей — только администратор.
     async fn users(&self, ctx: &Context<'_>) -> Result<Vec<User>> { Ok(svc::users_list(ctx).await?) }
 
@@ -63,8 +65,11 @@ pub struct Mutation;
 #[Object]
 impl Mutation {
     // ----- Аутентификация -----
-    async fn register(&self, ctx: &Context<'_>, first_name: String, last_name: String, email: String, password: String, role: UserRole) -> Result<AuthPayload> {
-        Ok(svc::register(ctx, &first_name, &last_name, &email, &password, role).await?)
+    /// Регистрация волонтёра или организатора. `consent` — согласие на обработку персональных данных (обязательно).
+    /// Для организатора можно указать название организации.
+    #[allow(clippy::too_many_arguments)]
+    async fn register(&self, ctx: &Context<'_>, first_name: String, last_name: String, email: String, password: String, role: UserRole, consent: bool, organization_name: Option<String>) -> Result<AuthPayload> {
+        Ok(svc::register(ctx, &first_name, &last_name, &email, &password, role, consent, organization_name).await?)
     }
     async fn login(&self, ctx: &Context<'_>, email: String, password: String) -> Result<AuthPayload> {
         Ok(svc::login(ctx, &email, &password).await?)
@@ -74,6 +79,11 @@ impl Mutation {
     async fn change_password(&self, ctx: &Context<'_>, old_password: String, new_password: String) -> Result<bool> {
         Ok(svc::change_password(ctx, &old_password, &new_password).await?)
     }
+
+    /// Все данные пользователя о нём самом в виде JSON (право на доступ к данным, 152-ФЗ).
+    async fn export_my_data(&self, ctx: &Context<'_>) -> Result<String> { Ok(svc::export_my_data(ctx).await?) }
+    /// Удаление учётной записи с немедленным обезличиванием персональных данных. Требует пароль.
+    async fn delete_my_account(&self, ctx: &Context<'_>, password: String) -> Result<bool> { Ok(svc::delete_my_account(ctx, &password).await?) }
 
     // ----- Администратор -----
     async fn register_organization(&self, ctx: &Context<'_>, name: String, contact_person: String, email: String, phone: String, inn: Option<String>, description: Option<String>) -> Result<Organization> {
@@ -92,13 +102,17 @@ impl Mutation {
     async fn create_event(&self, ctx: &Context<'_>, title: String, description: String, location: String, start_date: String, end_date: String, required_volunteers: i32, planned_hours: f64, organization_id: ID) -> Result<Event> {
         Ok(svc::create_event(ctx, &title, &description, &location, &start_date, &end_date, required_volunteers, planned_hours, parse_id(&organization_id)?).await?)
     }
-    /// OPEN → ACCEPTED | CANCELLED
+    /// OPEN → ACCEPTED | CANCELLED; ACCEPTED → CANCELLED (отзыв принятой заявки)
     async fn moderate_request(&self, ctx: &Context<'_>, request_id: ID, status: RequestStatus, rejection_reason: Option<String>) -> Result<VolonteerEventRequest> {
         Ok(svc::moderate_request(ctx, parse_id(&request_id)?, status, rejection_reason).await?)
     }
     /// ACCEPTED → CONFIRMED (часы проставляются атомарно)
     async fn confirm_volunteer_work(&self, ctx: &Context<'_>, request_id: ID, confirmed_hours: f64) -> Result<VolonteerEventRequest> {
         Ok(svc::confirm_work(ctx, parse_id(&request_id)?, confirmed_hours).await?)
+    }
+    /// DRAFT | ACCEPTED → CANCELLED. Заявки принятого события отменяются автоматически.
+    async fn cancel_event(&self, ctx: &Context<'_>, event_id: ID, reason: Option<String>) -> Result<Event> {
+        Ok(svc::cancel_event(ctx, parse_id(&event_id)?, reason).await?)
     }
     /// ACCEPTED → CLOSED
     async fn close_event(&self, ctx: &Context<'_>, event_id: ID) -> Result<Event> { Ok(svc::close_event(ctx, parse_id(&event_id)?).await?) }
@@ -107,7 +121,7 @@ impl Mutation {
     async fn submit_event_request(&self, ctx: &Context<'_>, volonteer_id: ID, event_id: ID, description: Option<String>) -> Result<VolonteerEventRequest> {
         Ok(svc::submit_request(ctx, parse_id(&volonteer_id)?, parse_id(&event_id)?, description).await?)
     }
-    /// OPEN → CANCELLED
+    /// OPEN | ACCEPTED → CANCELLED (волонтёр отказывается от участия)
     async fn cancel_event_request(&self, ctx: &Context<'_>, request_id: ID) -> Result<VolonteerEventRequest> {
         Ok(svc::cancel_request(ctx, parse_id(&request_id)?).await?)
     }
@@ -126,7 +140,7 @@ impl Mutation {
     async fn reject_marker_close(&self, ctx: &Context<'_>, marker_id: ID, reason: Option<String>) -> Result<MapMarker> {
         Ok(svc::reject_marker_close(ctx, parse_id(&marker_id)?, reason).await?)
     }
-    /// Закрытие обычной метки (автор или администратор).
+    /// Закрытие метки (автор или администратор). Закрытая метка ПСО удаляется сразу.
     async fn close_map_marker(&self, ctx: &Context<'_>, marker_id: ID) -> Result<MapMarker> { Ok(svc::close_marker(ctx, parse_id(&marker_id)?).await?) }
     async fn delete_map_marker(&self, ctx: &Context<'_>, marker_id: ID) -> Result<bool> { Ok(svc::delete_marker(ctx, parse_id(&marker_id)?).await?) }
 }

@@ -149,6 +149,69 @@ describe('ApiStore: мутации идут на сервер', () => {
   });
 });
 
+describe('ApiStore: отмена, регистрация и персональные данные', () => {
+  it('отмена события уходит на сервер вместе с причиной', async () => {
+    const client = fakeClient({ cancelEvent: () => ({ cancelEvent: { id: 'e2', status: 'CANCELLED', cancelReason: 'Погода' } }) });
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    const res = await store.cancelEvent('e2', '  Погода ');
+    expect(res.success).toBe(true);
+    expect(client.calls.find((c) => c.query.includes('cancelEvent(')).variables).toEqual({ eventId: 'e2', reason: 'Погода' });
+    await store.cancelEvent('e2');
+    expect(client.calls.filter((c) => c.query.includes('cancelEvent(')).at(-1).variables.reason).toBeNull();
+  });
+
+  it('регистрация без согласия на обработку данных не отправляется', async () => {
+    const client = fakeClient({ register: () => ({ register: { user: SNAPSHOT.me, expiresAt: 'x' } }) });
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    const res = await store.register({ firstName: 'А', lastName: 'Б', email: 'a@b.ru', password: 'Str0ng-pass', role: 'VOLUNTEER', consent: false });
+    expect(res.success).toBe(false);
+    expect(res.message).toMatch(/согласие/);
+    expect(client.calls.some((c) => c.query.includes('register('))).toBe(false);
+  });
+
+  it('регистрация организатора передаёт название организации, волонтёра — нет', async () => {
+    const client = fakeClient({ register: () => ({ register: { user: SNAPSHOT.me, expiresAt: 'x' } }) });
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    const base = { firstName: 'А', lastName: 'Б', email: 'a@b.ru', password: 'Str0ng-pass', consent: true, organizationName: ' Клуб ' };
+    await store.register({ ...base, role: 'ORGANIZER' });
+    await store.register({ ...base, role: 'VOLUNTEER' });
+    const sent = client.calls.filter((c) => c.query.includes('register(')).map((c) => c.variables);
+    expect(sent[0]).toMatchObject({ role: 'ORGANIZER', consent: true, organizationName: 'Клуб' });
+    expect(sent[1]).toMatchObject({ role: 'VOLUNTEER', consent: true, organizationName: null });
+  });
+
+  it('выгрузка данных возвращает JSON-текст и имя файла', async () => {
+    const client = fakeClient({ exportMyData: () => ({ exportMyData: '{"account":{}}' }) });
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    const res = await store.exportMyData();
+    expect(res.success).toBe(true);
+    expect(JSON.parse(res.json)).toEqual({ account: {} });
+    expect(res.fileName).toMatch(/^moi-dannye-volontery-\d{4}-\d{2}-\d{2}\.json$/);
+  });
+
+  it('удаление аккаунта: пароль уходит на сервер, роль интерфейса сбрасывается', async () => {
+    let deleted = false;
+    const client = vi.fn(async (query, variables) => {
+      if (query === HYDRATE_QUERY) return deleted ? { ...structuredClone(SNAPSHOT), me: null, session: null } : structuredClone(SNAPSHOT);
+      deleted = true;
+      client.last = variables;
+      return { deleteMyAccount: true };
+    });
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    store.setCurrentRole('VOLUNTEER');
+    const res = await store.deleteMyAccount('vol123');
+    expect(res.success).toBe(true);
+    expect(client.last).toEqual({ password: 'vol123' });
+    expect(store.getCurrentUser()).toBeNull();
+    expect(store.getCurrentRole()).toBe('PUBLIC');
+  });
+});
+
 describe('ApiStore: проверки до отправки', () => {
   it('отзыв: оценка, длина и право участвовать', async () => {
     const client = fakeClient({ submitEventReview: () => ({ submitEventReview: { id: 'rv2' } }) });

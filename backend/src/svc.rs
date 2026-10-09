@@ -118,6 +118,9 @@ fn rate_limit(ctx: &Context<'_>, key: &'static str, limit: u32) -> AppResult<()>
     Ok(())
 }
 
+/// Версия политики обработки персональных данных (docs/PRIVACY.md). Меняется при изменении политики.
+pub const PRIVACY_POLICY_VERSION: &str = "2026-10-09";
+
 const MAX_FAILED: i16 = 5;
 const LOCK_MINUTES: i64 = 15;
 const BAD_CREDENTIALS: &str = "Неверный email или пароль";
@@ -129,7 +132,7 @@ pub async fn login(ctx: &Context<'_>, email: &str, password: &str) -> AppResult<
     if password.len() > 1024 { return Err(AppError::validation(BAD_CREDENTIALS)); }
 
     let row: Option<(Uuid, String, i32, i16, Option<chrono::DateTime<Utc>>)> = sqlx::query_as(
-        "SELECT id, password_hash, token_version, failed_logins, locked_until FROM users WHERE lower(email) = $1",
+        "SELECT id, password_hash, token_version, failed_logins, locked_until FROM users WHERE lower(email) = $1 AND deleted_at IS NULL",
     ).bind(&email).fetch_optional(pool).await?;
 
     let Some((id, hash, tv, failed, locked_until)) = row else {
@@ -167,8 +170,12 @@ pub async fn login(ctx: &Context<'_>, email: &str, password: &str) -> AppResult<
     Ok(AuthPayload { token: client(ctx).want_token.then_some(token), user: user_by_id(pool, id).await?, expires_at })
 }
 
-pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, password: &str, role: UserRole) -> AppResult<AuthPayload> {
+#[allow(clippy::too_many_arguments)]
+pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, password: &str, role: UserRole, consent: bool, organization_name: Option<String>) -> AppResult<AuthPayload> {
     rate_limit(ctx, "register", 10)?;
+    if !consent {
+        return Err(AppError::validation("Для регистрации необходимо согласие на обработку персональных данных"));
+    }
     if role == UserRole::Admin {
         return Err(AppError::validation("Администратор не может быть создан через публичную регистрацию"));
     }
@@ -197,9 +204,16 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
                 })?);
         }
         UserRole::Organizer => {
-            let mut name = format!("Организация: {last} {first}");
+            let explicit = clean_opt(&organization_name, "Название организации", 200)?;
+            if let Some(n) = &explicit {
+                if n.chars().count() < 2 { return Err(AppError::validation("Название организации — от 2 до 200 символов")); }
+            }
+            let mut name = explicit.clone().unwrap_or_else(|| format!("Организация: {last} {first}"));
             let taken: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM organizations WHERE lower(name) = lower($1)").bind(&name).fetch_optional(&mut *tx).await?;
-            if taken.is_some() { name = format!("{name} ({email})"); }
+            if taken.is_some() {
+                if explicit.is_some() { return Err(AppError::conflict("Организация с таким названием уже зарегистрирована")); }
+                name = format!("{name} ({email})");
+            }
             org = Some(sqlx::query_scalar(
                 "INSERT INTO organizations (name, contact_person, email, description) VALUES ($1,$2,$3,'Новый организатор социально-волонтёрских инициатив') RETURNING id",
             ).bind(&name).bind(format!("{last} {first}")).bind(&email).fetch_one(&mut *tx).await?);
@@ -207,13 +221,13 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
         UserRole::Admin => unreachable!(),
     }
     let user_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO users (person_id, email, password_hash, role, organization_id, volonteer_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
-    ).bind(person_id).bind(&email).bind(&hash).bind(role).bind(org).bind(vol).fetch_one(&mut *tx).await
+        "INSERT INTO users (person_id, email, password_hash, role, organization_id, volonteer_id, consent_version, consent_at) VALUES ($1,$2,$3,$4,$5,$6,$7,now()) RETURNING id",
+    ).bind(person_id).bind(&email).bind(&hash).bind(role).bind(org).bind(vol).bind(PRIVACY_POLICY_VERSION).fetch_one(&mut *tx).await
         .map_err(|e| match AppError::from(e) {
             AppError::Conflict(_) => AppError::conflict("Пользователь с таким адресом электронной почты уже зарегистрирован!"),
             other => other,
         })?;
-    audit(&mut tx, None, "auth.register", "user", Some(user_id), json!({"role": role})).await?;
+    audit(&mut tx, None, "auth.register", "user", Some(user_id), json!({"role": role, "consent": PRIVACY_POLICY_VERSION})).await?;
     tx.commit().await?;
 
     let (token, expires_at) = start_session(ctx, user_id, 0)?;
@@ -455,6 +469,25 @@ pub async fn moderate_event(ctx: &Context<'_>, id: Uuid, status: EventStatus) ->
         _ => Err(AppError::validation("Модерация допускает только статусы ACCEPTED и CANCELLED")),
     }
 }
+/// Отмена события организатором или администратором: DRAFT → CANCELLED или ACCEPTED → CANCELLED.
+/// При отмене принятого события все открытые и принятые заявки отменяются каскадом (триггер БД).
+pub async fn cancel_event(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -> AppResult<Event> {
+    let v = need(ctx)?;
+    let reason = clean_opt(&reason, "Причина отмены", 500)?;
+    let mut tx = st(ctx).pool.begin().await?;
+    let org = event_org(&mut tx, id).await?;
+    if !v.can_act_for_org(org) { return Err(AppError::Forbidden); }
+    let affected: i64 = sqlx::query_scalar("SELECT count(*) FROM volonteer_event_requests WHERE event_id = $1 AND status IN ('OPEN','ACCEPTED')")
+        .bind(id).fetch_one(&mut *tx).await?;
+    let n = sqlx::query("UPDATE events SET status = 'CANCELLED', cancel_reason = $2 WHERE id = $1 AND status IN ('DRAFT','ACCEPTED')")
+        .bind(id).bind(&reason).execute(&mut *tx).await?.rows_affected();
+    if n == 0 { return Err(AppError::conflict("Отменить можно только событие в статусе DRAFT или ACCEPTED")); }
+    audit(&mut tx, Some(v), "event.cancel", "event", Some(id), json!({"requestsCancelled": affected, "withReason": reason.is_some()})).await?;
+    let ev = fetch_event(&mut tx, id).await?;
+    tx.commit().await?;
+    Ok(ev)
+}
+
 pub async fn close_event(ctx: &Context<'_>, id: Uuid) -> AppResult<Event> {
     transition_event(ctx, id, EventStatus::Accepted, EventStatus::Closed, false, "event.close").await
 }
@@ -518,9 +551,9 @@ pub async fn moderate_request(ctx: &Context<'_>, id: Uuid, status: RequestStatus
     let mut tx = st(ctx).pool.begin().await?;
     let (org, _) = request_owner(&mut tx, id).await?;
     if !v.can_act_for_org(org) { return Err(AppError::Forbidden); }
-    let n = sqlx::query("UPDATE volonteer_event_requests SET status = $2, rejection_reason = $3 WHERE id = $1 AND status = 'OPEN'")
+    let n = sqlx::query("UPDATE volonteer_event_requests SET status = $2, rejection_reason = $3 WHERE id = $1 AND (status = 'OPEN' OR ($2::request_status = 'CANCELLED' AND status = 'ACCEPTED'))")
         .bind(id).bind(status).bind(if status == RequestStatus::Cancelled { reason } else { None }).execute(&mut *tx).await?.rows_affected();
-    if n == 0 { return Err(AppError::conflict("Решение по заявке уже принято")); }
+    if n == 0 { return Err(AppError::conflict("Решение по заявке уже принято и изменить его нельзя")); }
     audit(&mut tx, Some(v), "request.moderate", "request", Some(id), json!({"to": status})).await?;
     let r = fetch_request(&mut tx, id).await?;
     tx.commit().await?;
@@ -549,9 +582,9 @@ pub async fn cancel_request(ctx: &Context<'_>, id: Uuid) -> AppResult<VolonteerE
     let mut tx = st(ctx).pool.begin().await?;
     let (org, vol) = request_owner(&mut tx, id).await?;
     if !(v.can_act_for_org(org) || v.can_act_for_volonteer(vol)) { return Err(AppError::Forbidden); }
-    let n = sqlx::query("UPDATE volonteer_event_requests SET status = 'CANCELLED' WHERE id = $1 AND status = 'OPEN'").bind(id).execute(&mut *tx).await?.rows_affected();
-    if n == 0 { return Err(AppError::conflict("Отменить можно только заявку, по которой ещё не принято решение")); }
-    audit(&mut tx, Some(v), "request.cancel", "request", Some(id), json!({})).await?;
+    let n = sqlx::query("UPDATE volonteer_event_requests SET status = 'CANCELLED' WHERE id = $1 AND status IN ('OPEN','ACCEPTED')").bind(id).execute(&mut *tx).await?.rows_affected();
+    if n == 0 { return Err(AppError::conflict("Отменить можно только заявку, по которой ещё не подтверждены часы")); }
+    audit(&mut tx, Some(v), "request.cancel", "request", Some(id), json!({"by": if v.can_act_for_volonteer(vol) { "volonteer" } else { "organizer" }})).await?;
     let r = fetch_request(&mut tx, id).await?;
     tx.commit().await?;
     Ok(r)
@@ -755,9 +788,24 @@ pub async fn approve_marker_close(ctx: &Context<'_>, id: Uuid) -> AppResult<MapM
     sqlx::query("UPDATE marker_closures SET approved_at = now(), approved_by = $2
                   WHERE id = (SELECT id FROM marker_closures WHERE marker_id = $1 AND approved_at IS NULL AND rejected_at IS NULL ORDER BY submitted_at DESC LIMIT 1)")
         .bind(id).bind(&v.full_name).execute(&mut *tx).await?;
-    audit(&mut tx, Some(v), "marker.close_approved", "marker", Some(id), json!({"status": target})).await?;
+    audit(&mut tx, Some(v), "marker.close_approved", "marker", Some(id), json!({"status": target, "removed": true})).await?;
+    // Решение заказчика: закрытая ПСО исчезает сразу — метка, фото и отчёт удаляются из БД
+    let gone = remove_search_marker(&mut tx, id, target).await?;
     tx.commit().await?;
-    marker_one(ctx, id).await
+    Ok(gone)
+}
+
+/// Удаляет закрытую метку ПСО вместе с фотографиями и отчётом о закрытии (каскадом БД).
+/// Возвращает «снимок» метки без фото — чтобы ответить на мутацию.
+async fn remove_search_marker(conn: &mut PgConnection, id: Uuid, final_status: MapMarkerStatus) -> AppResult<MapMarker> {
+    let r = sqlx::query_as::<_, MarkerRow>(&format!("{MARKER_SELECT} WHERE id = $1")).bind(id).fetch_optional(&mut *conn).await?
+        .ok_or_else(|| AppError::not_found("Метка не найдена"))?;
+    sqlx::query("DELETE FROM map_markers WHERE id = $1").bind(id).execute(&mut *conn).await?;
+    Ok(MapMarker {
+        id: gid(r.id), kind: r.kind, status: final_status, title: r.title, description: r.description, lat: r.lat, lng: r.lng,
+        urgency: r.urgency, contact_phone: None, last_seen_date: None, last_seen_location: None,
+        photos: vec![], closure_proof: None, created_by: None, created_by_name: String::new(), created_at: rfc3339(r.created_at),
+    })
 }
 
 pub async fn reject_marker_close(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -> AppResult<MapMarker> {
@@ -787,7 +835,12 @@ pub async fn close_marker(ctx: &Context<'_>, id: Uuid) -> AppResult<MapMarker> {
     if !(v.is_admin() || owner == Some(v.user_id)) { return Err(AppError::Forbidden); }
     let n = sqlx::query("UPDATE map_markers SET status = 'CLOSED' WHERE id = $1 AND status = 'ACTIVE'").bind(id).execute(&mut *tx).await?.rows_affected();
     if n == 0 { return Err(AppError::conflict("Метка уже закрыта или ожидает согласования")); }
-    audit(&mut tx, Some(v), "marker.close", "marker", Some(id), json!({})).await?;
+    audit(&mut tx, Some(v), "marker.close", "marker", Some(id), json!({"removed": kind == MapMarkerType::SearchRescue})).await?;
+    if kind == MapMarkerType::SearchRescue {
+        let gone = remove_search_marker(&mut tx, id, MapMarkerStatus::Closed).await?;
+        tx.commit().await?;
+        return Ok(gone);
+    }
     tx.commit().await?;
     marker_one(ctx, id).await
 }
@@ -800,6 +853,118 @@ pub async fn delete_marker(ctx: &Context<'_>, id: Uuid) -> AppResult<bool> {
     if n == 0 { return Err(AppError::not_found("Метка не найдена")); }
     audit(&mut tx, Some(v), "marker.delete", "marker", Some(id), json!({})).await?;
     tx.commit().await?;
+    Ok(true)
+}
+
+// ---------- Персональные данные: выгрузка и удаление (152-ФЗ) -------------------------------------------------
+/// Все данные пользователя о нём самом одним JSON-документом (право на доступ к данным).
+pub async fn export_my_data(ctx: &Context<'_>) -> AppResult<String> {
+    rate_limit(ctx, "export", 10)?;
+    let v = need(ctx)?;
+    let mut tx = st(ctx).pool.begin().await?;
+    let account: Value = sqlx::query_scalar(
+        "SELECT to_jsonb(t) FROM (SELECT u.email, u.role, u.created_at AS \"registeredAt\", u.last_login_at AS \"lastLoginAt\",
+                u.consent_at AS \"consentAt\", u.consent_version AS \"consentVersion\",
+                p.first_name AS \"firstName\", p.last_name AS \"lastName\", p.middle_name AS \"middleName\", p.birth_date AS \"birthDate\"
+           FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1) t",
+    ).bind(v.user_id).fetch_one(&mut *tx).await?;
+    let volunteer: Option<Value> = match v.volonteer_id {
+        Some(id) => sqlx::query_scalar("SELECT to_jsonb(t) FROM (SELECT phone, student_id AS \"studentId\", faculty FROM volonteers WHERE id = $1) t").bind(id).fetch_optional(&mut *tx).await?,
+        None => None,
+    };
+    let organization: Option<Value> = match v.organization_id {
+        Some(id) => sqlx::query_scalar("SELECT to_jsonb(t) FROM (SELECT name, inn, contact_person AS \"contactPerson\", email, phone, description FROM organizations WHERE id = $1) t").bind(id).fetch_optional(&mut *tx).await?,
+        None => None,
+    };
+    let requests: Value = sqlx::query_scalar(
+        "SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.\"createdAt\"), '[]'::jsonb) FROM (
+            SELECT e.title AS event, r.status, r.description, r.requested_hours::float8 AS \"requestedHours\", r.confirmed_hours::float8 AS \"confirmedHours\", r.created_at AS \"createdAt\"
+              FROM volonteer_event_requests r JOIN events e ON e.id = r.event_id WHERE r.volonteer_id = $1) t",
+    ).bind(v.volonteer_id).fetch_one(&mut *tx).await?;
+    let reviews: Value = sqlx::query_scalar(
+        "SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.\"createdAt\"), '[]'::jsonb) FROM (
+            SELECT e.title AS event, rv.rating, rv.text, rv.created_at AS \"createdAt\"
+              FROM event_reviews rv JOIN events e ON e.id = rv.event_id WHERE rv.volonteer_id = $1) t",
+    ).bind(v.volonteer_id).fetch_one(&mut *tx).await?;
+    let markers: Value = sqlx::query_scalar(
+        "SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.\"createdAt\"), '[]'::jsonb) FROM (
+            SELECT m.type, m.status, m.title, m.description, m.lat, m.lng, m.contact_phone AS \"contactPhone\", m.created_at AS \"createdAt\",
+                   (SELECT count(*) FROM photos p WHERE p.marker_id = m.id AND p.uploaded_by = $1) AS \"photosUploaded\"
+              FROM map_markers m WHERE m.created_by = $1) t",
+    ).bind(v.user_id).fetch_one(&mut *tx).await?;
+    let activity: Value = sqlx::query_scalar(
+        "SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.at), '[]'::jsonb) FROM (
+            SELECT at, action, entity FROM audit_log WHERE actor_user_id = $1 OR (entity = 'user' AND entity_id = $1) ORDER BY at DESC LIMIT 1000) t",
+    ).bind(v.user_id).fetch_one(&mut *tx).await?;
+    audit(&mut tx, Some(v), "account.export", "user", Some(v.user_id), json!({})).await?;
+    tx.commit().await?;
+    let doc = json!({
+        "exportedAt": rfc3339(Utc::now()),
+        "privacyPolicyVersion": PRIVACY_POLICY_VERSION,
+        "account": account,
+        "volunteerProfile": volunteer,
+        "organization": organization,
+        "eventRequests": requests,
+        "eventReviews": reviews,
+        "mapMarkers": markers,
+        "activityLog": activity,
+    });
+    Ok(serde_json::to_string_pretty(&doc).map_err(|e| anyhow::anyhow!("json: {e}"))?)
+}
+
+const DELETED_NAME: (&str, &str) = ("пользователь", "Удалённый");
+
+/// Удаление учётной записи (право на удаление): персональные данные обезличиваются сразу.
+/// Что остаётся: обезличенные заявки и часы (нужны организаторам для отчётности), псевдонимный журнал аудита.
+pub async fn delete_my_account(ctx: &Context<'_>, password: &str) -> AppResult<bool> {
+    rate_limit(ctx, "delete", 5)?;
+    let v = need(ctx)?;
+    if v.is_admin() {
+        return Err(AppError::validation("Администратор не может удалить себя из приложения. Попросите другого администратора."));
+    }
+    let pool = &st(ctx).pool;
+    let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1 AND deleted_at IS NULL").bind(v.user_id).fetch_optional(pool).await?
+        .ok_or(AppError::Unauthenticated)?;
+    let pw = password.to_string();
+    if !tokio::task::spawn_blocking(move || auth::verify_password(&pw, &hash)).await.map_err(|e| anyhow::anyhow!("join: {e}"))? {
+        return Err(AppError::validation("Пароль указан неверно"));
+    }
+    let (first, last) = DELETED_NAME;
+    let tombstone = format!("{last} {first}");
+    let mut tx = pool.begin().await?;
+    let person_id: Uuid = sqlx::query_scalar("SELECT person_id FROM users WHERE id = $1").bind(v.user_id).fetch_one(&mut *tx).await?;
+
+    if let Some(org) = v.organization_id {
+        let active: i64 = sqlx::query_scalar("SELECT count(*) FROM events WHERE organization_id = $1 AND status = 'ACCEPTED'").bind(org).fetch_one(&mut *tx).await?;
+        if active > 0 {
+            return Err(AppError::conflict("Сначала отмените или закройте активные события организации"));
+        }
+        sqlx::query("UPDATE events SET status = 'CANCELLED', cancel_reason = 'Организатор удалил учётную запись' WHERE organization_id = $1 AND status = 'DRAFT'")
+            .bind(org).execute(&mut *tx).await?;
+        let others: i64 = sqlx::query_scalar("SELECT count(*) FROM users WHERE organization_id = $1 AND id <> $2 AND deleted_at IS NULL").bind(org).bind(v.user_id).fetch_one(&mut *tx).await?;
+        if others == 0 {
+            sqlx::query("UPDATE organizations SET contact_person = '', email = '', phone = '' WHERE id = $1").bind(org).execute(&mut *tx).await?;
+        }
+    }
+    if let Some(vol) = v.volonteer_id {
+        sqlx::query("UPDATE volonteer_event_requests SET status = 'CANCELLED', rejection_reason = 'Волонтёр удалил учётную запись'
+                      WHERE volonteer_id = $1 AND (status = 'OPEN' OR (status = 'ACCEPTED' AND event_id IN (SELECT id FROM events WHERE status = 'ACCEPTED')))")
+            .bind(vol).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM event_reviews WHERE volonteer_id = $1").bind(vol).execute(&mut *tx).await?;
+        sqlx::query("UPDATE persons SET first_name = $2, last_name = $3, middle_name = NULL, birth_date = NULL WHERE id = (SELECT person_id FROM volonteers WHERE id = $1)")
+            .bind(vol).bind(first).bind(last).execute(&mut *tx).await?;
+        sqlx::query("UPDATE volonteers SET email = 'deleted-' || id::text || '@deleted.invalid', phone = '', student_id = NULL, faculty = NULL WHERE id = $1")
+            .bind(vol).execute(&mut *tx).await?;
+    }
+    sqlx::query("UPDATE persons SET first_name = $2, last_name = $3, middle_name = NULL, birth_date = NULL WHERE id = $1")
+        .bind(person_id).bind(first).bind(last).execute(&mut *tx).await?;
+    sqlx::query("UPDATE map_markers SET contact_phone = NULL, created_by_name = $2 WHERE created_by = $1").bind(v.user_id).bind(&tombstone).execute(&mut *tx).await?;
+    sqlx::query("UPDATE marker_closures SET submitted_by_name = $2 WHERE submitted_by = $1").bind(v.user_id).bind(&tombstone).execute(&mut *tx).await?;
+    sqlx::query("UPDATE users SET email = 'deleted-' || id::text || '@deleted.invalid', password_hash = '!', token_version = token_version + 1,
+                        failed_logins = 0, locked_until = NULL, deleted_at = now() WHERE id = $1").bind(v.user_id).execute(&mut *tx).await?;
+    audit(&mut tx, Some(v), "account.delete", "user", Some(v.user_id), json!({})).await?;
+    tx.commit().await?;
+    set_cookie(ctx, auth::clear_cookie(st(ctx).cfg.cookie_secure));
     Ok(true)
 }
 

@@ -1119,3 +1119,15 @@ code { font-size: 0.85em; background: var(--slate-100); padding: 1px 6px; border
   .main-content { padding: 0; max-width: none; }
   .statement-card { border: none; box-shadow: none; padding: 0; max-width: none; }
 }
+
+/* ---------- Согласие на обработку данных, политика, причины отмены ---------- */
+.consent-row { display: flex; gap: 0.6rem; align-items: flex-start; font-size: 0.85rem; color: var(--slate-700); margin-top: 0.4rem; cursor: pointer; }
+.consent-row input { margin-top: 0.2rem; width: 1.05rem; height: 1.05rem; flex: none; }
+.consent-details { margin-top: 0.6rem; font-size: 0.82rem; color: var(--slate-600); }
+.consent-details summary { cursor: pointer; color: var(--primary); font-weight: 600; }
+.policy-text { font-size: 0.88rem; line-height: 1.55; color: var(--slate-700); }
+.policy-text h5 { margin: 0.9rem 0 0.25rem; font-size: 0.92rem; color: var(--slate-900); }
+.policy-text ul, .policy-list { margin: 0.2rem 0 0.2rem 1.1rem; padding: 0; }
+.policy-text li, .policy-list li { margin: 0.2rem 0; }
+.cancel-note { margin-top: 0.4rem; font-size: 0.8rem; color: var(--danger); }
+.btn-row-wrap { display: flex; flex-wrap: wrap; gap: 0.4rem; }

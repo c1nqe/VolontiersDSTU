@@ -10,7 +10,7 @@ import { REQUEST_STATUS, formatDate } from '../utils/format.js';
 const MY_REQUEST_LABEL = {
   OPEN: 'На рассмотрении',
   ACCEPTED: 'Одобрена (готовимся)',
-  CANCELLED: 'Отклонена организатором',
+  CANCELLED: 'Отменена',
 };
 
 export default function VolunteerView() {
@@ -47,6 +47,12 @@ export default function VolunteerView() {
   const reviewable = myRequests.filter((r) => store.canReviewEvent(vol.id, r.eventId).allowed);
   const awaitingReview = reviewable.filter((r) => !myReviews.some((rv) => rv.eventId === r.eventId));
 
+  const withdraw = async (req) => {
+    const text = req.status === 'ACCEPTED' ? 'Отказаться от участия? Организатор увидит, что вы отказались.' : 'Отозвать заявку?';
+    if (!window.confirm(text)) return;
+    await run(store.cancelRequest(req.id), 'Заявка отменена', 'info');
+  };
+
   const apply = (eventId) => run(store.submitRequest(vol.id, eventId), 'Заявка на участие отправлена организатору!');
 
   const tabs = [
@@ -81,7 +87,7 @@ export default function VolunteerView() {
             <div className="cards-grid">
               {available.map((evt) => {
                 const req = myRequests.find((r) => r.eventId === evt.id);
-                const labels = { OPEN: 'Заявка на рассмотрении', ACCEPTED: 'Вы приняты', CONFIRMED: `Часы подтверждены (${req?.confirmedHours} ч)`, CANCELLED: 'Заявка отклонена' };
+                const labels = { OPEN: 'Заявка на рассмотрении', ACCEPTED: 'Вы приняты', CONFIRMED: `Часы подтверждены (${req?.confirmedHours} ч)`, CANCELLED: 'Заявка отменена' };
                 return (
                   <EventCard
                     key={evt.id}
@@ -121,6 +127,10 @@ export default function VolunteerView() {
                       <span className={`badge ${REQUEST_STATUS[r.status].badge}`}>
                         {r.status === 'CONFIRMED' ? `Подтверждено (${r.confirmedHours} ч)` : MY_REQUEST_LABEL[r.status]}
                       </span>
+                      {r.status === 'CANCELLED' && r.rejectionReason && <div className="cell-sub">{r.rejectionReason}</div>}
+                      {(r.status === 'OPEN' || (r.status === 'ACCEPTED' && r.eventStatus === 'ACCEPTED')) && (
+                        <div><button type="button" className="link-btn danger" onClick={() => withdraw(r)}>{r.status === 'ACCEPTED' ? 'Отказаться' : 'Отозвать заявку'}</button></div>
+                      )}
                     </td>
                     <td>
                       {mine ? (

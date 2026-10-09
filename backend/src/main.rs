@@ -38,6 +38,19 @@ async fn main() -> anyhow::Result<()> {
             let password = std::env::var("ADMIN_PASSWORD").context("задайте ADMIN_PASSWORD")?;
             seed::create_admin(&pool, email, last, first, &password).await?;
         }
+        "purge-audit" => {
+            // Срок хранения журнала аудита (политика: 3 года). Выполняется владельцем таблицы (DATABASE_URL роли volontiers_owner):
+            // рабочая роль сервера удалять записи журнала не может.
+            let days: i64 = std::env::args().nth(2).and_then(|d| d.parse().ok()).context("использование: purge-audit <дней хранения, не менее 365>")?;
+            anyhow::ensure!(days >= 365, "срок хранения журнала аудита не может быть меньше 365 дней");
+            let mut tx = pool.begin().await?;
+            sqlx::query("ALTER TABLE audit_log DISABLE TRIGGER audit_no_update").execute(&mut *tx).await.context("нужны права владельца таблицы audit_log")?;
+            let n = sqlx::query("DELETE FROM audit_log WHERE at < now() - make_interval(days => $1::int)").bind(days as i32).execute(&mut *tx).await?.rows_affected();
+            sqlx::query("ALTER TABLE audit_log ENABLE TRIGGER audit_no_update").execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO audit_log (action, entity, details) VALUES ('audit.purged', 'audit_log', $1)").bind(serde_json::json!({"olderThanDays": days, "deleted": n})).execute(&mut *tx).await?;
+            tx.commit().await?;
+            tracing::info!("удалено записей журнала аудита старше {days} дн.: {n}");
+        }
         "serve" => {
             if cfg.run_migrations { MIGRATOR.run(&pool).await?; }
             let bind = cfg.bind.clone();
@@ -49,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
                 .with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; })
                 .await?;
         }
-        other => anyhow::bail!("неизвестная команда «{other}». Доступно: serve | migrate | seed [--reset] | create-admin | schema"),
+        other => anyhow::bail!("неизвестная команда «{other}». Доступно: serve | migrate | seed [--reset] | create-admin | purge-audit <дней> | schema"),
     }
     Ok(())
 }

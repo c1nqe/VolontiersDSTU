@@ -122,7 +122,7 @@ pub async fn viewer_from_token(pool: &PgPool, secret: &[u8], token: &str) -> Opt
     let claims = decode_token(secret, token)?;
     let row: Option<(Uuid, UserRole, Option<Uuid>, Option<Uuid>, String, String, i32)> = sqlx::query_as(
         "SELECT u.id, u.role, u.organization_id, u.volonteer_id, p.last_name, p.first_name, u.token_version
-           FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1",
+           FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1 AND u.deleted_at IS NULL",
     )
     .bind(claims.sub)
     .fetch_optional(pool)

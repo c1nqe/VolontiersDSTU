@@ -145,7 +145,11 @@ async fn login_cookie_flags_lockout_and_logout() {
 #[tokio::test]
 async fn register_rules() {
     let env = Env::new().await;
-    let q = "mutation($e:String!,$p:String!,$r:UserRole!){register(firstName:\"Мария\",lastName:\"Тестова\",email:$e,password:$p,role:$r){user{id role organizationId volonteerId}}}";
+    let q = "mutation($e:String!,$p:String!,$r:UserRole!){register(firstName:\"Мария\",lastName:\"Тестова\",email:$e,password:$p,role:$r,consent:true){user{id role organizationId volonteerId consentAcceptedAt consentVersion}}}";
+    // без согласия на обработку персональных данных регистрация невозможна (152-ФЗ)
+    let (m, code) = env.err(None, "mutation{register(firstName:\"А\",lastName:\"Б\",email:\"nc@x.ru\",password:\"Str0ng-pass\",role:VOLUNTEER,consent:false){token}}", json!({})).await;
+    assert_eq!(code, "BAD_USER_INPUT");
+    assert!(m.contains("согласие"), "{m}");
     let (_, code) = env.err(None, q, json!({"e":"new@x.ru","p":"Str0ng-pass","r":"ADMIN"})).await;
     assert_eq!(code, "BAD_USER_INPUT", "ADMIN нельзя создать публичной регистрацией");
     let (m, _) = env.err(None, q, json!({"e":"new@x.ru","p":"short","r":"VOLUNTEER"})).await;
@@ -154,10 +158,21 @@ async fn register_rules() {
     assert!(m.contains("простой"));
     let d = env.ok(None, q, json!({"e":"New@X.ru","p":"Str0ng-pass","r":"VOLUNTEER"})).await;
     assert!(d["register"]["user"]["volonteerId"].is_string());
+    assert!(d["register"]["user"]["consentAcceptedAt"].is_string(), "момент согласия фиксируется");
+    let policy = env.ok(None, "{ privacyPolicyVersion }", json!({})).await;
+    assert_eq!(d["register"]["user"]["consentVersion"], policy["privacyPolicyVersion"], "версия политики фиксируется");
     let (m, code) = env.err(None, q, json!({"e":"new@x.ru","p":"Str0ng-pass","r":"ORGANIZER"})).await;
     assert_eq!(code, "CONFLICT", "{m}");
     let d = env.ok(None, q, json!({"e":"org2@x.ru","p":"Str0ng-pass","r":"ORGANIZER"})).await;
     assert!(d["register"]["user"]["organizationId"].is_string());
+    // организатор регистрируется сам и задаёт название организации; дубликат названия отклоняется
+    let qo = "mutation($e:String!,$n:String){register(firstName:\"Пётр\",lastName:\"Орг\",email:$e,password:\"Str0ng-pass\",role:ORGANIZER,consent:true,organizationName:$n){user{organizationId}}}";
+    let d = env.ok(None, qo, json!({"e": "own@x.ru", "n": "Клуб «Добрые руки»"})).await;
+    let oid = d["register"]["user"]["organizationId"].as_str().unwrap().to_string();
+    let name: String = sqlx::query_scalar("SELECT name FROM organizations WHERE id = $1::uuid").bind(&oid).fetch_one(&env.pool).await.unwrap();
+    assert_eq!(name, "Клуб «Добрые руки»");
+    let (m, code) = env.err(None, qo, json!({"e": "own2@x.ru", "n": "клуб «добрые руки»"})).await;
+    assert_eq!(code, "CONFLICT", "{m}");
     // пароль хранится только как argon2id-хэш
     let h: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE email = 'new@x.ru'").fetch_one(&env.pool).await.unwrap();
     assert!(h.starts_with("$argon2id$"));
@@ -189,7 +204,7 @@ async fn full_event_lifecycle_with_state_machine() {
     let (_, code) = env.err(Some(&o), "mutation($e:ID!){moderateEvent(eventId:$e,status:ACCEPTED){id}}", json!({"e": ev})).await;
     assert_eq!(code, "FORBIDDEN");
     env.ok(Some(&a), "mutation($e:ID!){moderateEvent(eventId:$e,status:ACCEPTED){status}}", json!({"e": ev})).await;
-    // ACCEPTED → CANCELLED запрещён автоматом состояний
+    // повторная модерация уже согласованного события отклоняется (отмена принятого — отдельная мутация cancelEvent)
     let (_, code) = env.err(Some(&a), "mutation($e:ID!){moderateEvent(eventId:$e,status:CANCELLED){id}}", json!({"e": ev})).await;
     assert_eq!(code, "CONFLICT");
 
@@ -210,10 +225,8 @@ async fn full_event_lifecycle_with_state_machine() {
     let (_, code) = env.err(Some(&v), "mutation($r:ID!){moderateRequest(requestId:$r,status:ACCEPTED){id}}", json!({"r": req})).await;
     assert_eq!(code, "FORBIDDEN");
     env.ok(Some(&o), "mutation($r:ID!){moderateRequest(requestId:$r,status:ACCEPTED){status}}", json!({"r": req})).await;
-    // решение уже принято: повторное решение и отмена запрещены
-    let (_, code) = env.err(Some(&o), "mutation($r:ID!){moderateRequest(requestId:$r,status:CANCELLED){id}}", json!({"r": req})).await;
-    assert_eq!(code, "CONFLICT");
-    let (_, code) = env.err(Some(&v), "mutation($r:ID!){cancelEventRequest(requestId:$r){id}}", json!({"r": req})).await;
+    // повторное принятие той же заявки отклоняется
+    let (_, code) = env.err(Some(&o), "mutation($r:ID!){moderateRequest(requestId:$r,status:ACCEPTED){id}}", json!({"r": req})).await;
     assert_eq!(code, "CONFLICT");
 
     // 6. подтверждение часов — один раз
@@ -295,16 +308,17 @@ async fn authorization_boundaries() {
 async fn database_enforces_state_machine_and_audit() {
     let env = Env::new().await;
     let bad = |sql: &'static str| { let pool = env.pool.clone(); async move { sqlx::query(sql).execute(&pool).await } };
-    // события: CLOSED → DRAFT / ACCEPTED → CANCELLED / DRAFT → CLOSED запрещены даже прямым SQL
+    // события: CLOSED → DRAFT / CLOSED → CANCELLED / DRAFT → CLOSED запрещены даже прямым SQL
     assert!(bad("UPDATE events SET status = 'DRAFT' WHERE status = 'CLOSED'").await.is_err());
-    assert!(bad("UPDATE events SET status = 'CANCELLED' WHERE status = 'ACCEPTED'").await.is_err());
+    assert!(bad("UPDATE events SET status = 'CANCELLED' WHERE status = 'CLOSED'").await.is_err());
     assert!(bad("UPDATE events SET status = 'CLOSED' WHERE status = 'DRAFT'").await.is_err());
-    // заявки: OPEN → CONFIRMED, ACCEPTED → CANCELLED запрещены; часы только при CONFIRMED
+    // заявки: OPEN → CONFIRMED, CONFIRMED → CANCELLED, ACCEPTED → OPEN запрещены; часы только при CONFIRMED
     assert!(bad("UPDATE volonteer_event_requests SET status = 'CONFIRMED', confirmed_hours = 1 WHERE status = 'OPEN'").await.is_err());
-    assert!(bad("UPDATE volonteer_event_requests SET status = 'CANCELLED' WHERE status = 'ACCEPTED'").await.is_err());
+    assert!(bad("UPDATE volonteer_event_requests SET status = 'CANCELLED' WHERE status = 'CONFIRMED'").await.is_err());
+    assert!(bad("UPDATE volonteer_event_requests SET status = 'OPEN' WHERE status = 'ACCEPTED'").await.is_err());
     assert!(bad("UPDATE volonteer_event_requests SET confirmed_hours = 5 WHERE status = 'ACCEPTED'").await.is_err());
-    // метки: FOUND → ACTIVE запрещён
-    assert!(bad("UPDATE map_markers SET status = 'ACTIVE' WHERE status = 'FOUND'").await.is_err());
+    // метки: ACTIVE → FOUND (минуя отчёт и согласование) запрещён
+    assert!(bad("UPDATE map_markers SET status = 'FOUND' WHERE status = 'ACTIVE'").await.is_err());
     // отзыв без участия запрещён триггером
     assert!(bad("INSERT INTO event_reviews (event_id, volonteer_id, author_name, rating, text)
                  SELECT e.id, v.id, 'x', 5, 'Отзыв без участия в событии' FROM events e, volonteers v
@@ -381,14 +395,22 @@ async fn photos_pipeline_and_access() {
     assert!(guest["mapMarkers"].as_array().unwrap().iter().all(|m| m["closureProof"].is_null()), "гость не видит отчёты о закрытии");
 
     // согласует только администратор
-    let appr = "mutation($m:ID!){approveMarkerClose(markerId:$m){status closureProof{approvedBy}}}";
+    let appr = "mutation($m:ID!){approveMarkerClose(markerId:$m){status photos}}";
     let (_, code) = env.err(Some(&v), appr, json!({"m": marker})).await;
     assert_eq!(code, "FORBIDDEN");
     let admin = env.admin().await;
     let d = env.ok(Some(&admin), appr, json!({"m": marker})).await;
     assert_eq!(d["approveMarkerClose"]["status"], "FOUND");
+    // закрытая ПСО исчезает сразу: метка, фото и отчёт удалены из БД
     let (_, code) = env.err(Some(&admin), appr, json!({"m": marker})).await;
-    assert_eq!(code, "CONFLICT");
+    assert_eq!(code, "CONFLICT", "метки больше нет — согласовывать нечего");
+    let gone = env.ok(Some(&admin), "{ mapMarkers { id } }", json!({})).await;
+    assert!(gone["mapMarkers"].as_array().unwrap().iter().all(|m| m["id"] != marker.as_str()), "закрытая ПСО не отображается");
+    let left: i64 = sqlx::query_scalar("SELECT (SELECT count(*) FROM map_markers WHERE id = $1::uuid) + (SELECT count(*) FROM photos WHERE marker_id = $1::uuid) + (SELECT count(*) FROM marker_closures WHERE marker_id = $1::uuid)")
+        .bind(&marker).fetch_one(&env.pool).await.unwrap();
+    assert_eq!(left, 0, "метка, фото и отчёт удалены");
+    let (st, _, _) = get(photos[0].clone(), None).await;
+    assert_eq!(st, StatusCode::NOT_FOUND, "фото закрытой ПСО недоступно");
     env.cleanup().await;
 }
 
@@ -427,5 +449,149 @@ async fn seed_is_idempotent() {
     seed::run(&env.pool, true).await.unwrap();
     let again: i64 = sqlx::query_scalar("SELECT count(*) FROM events").fetch_one(&env.pool).await.unwrap();
     assert_eq!(before, again);
+    env.cleanup().await;
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Новые переходы: ACCEPTED → CANCELLED у события и у заявки (решение заказчика Q2).
+#[tokio::test]
+async fn cancellation_of_accepted_events_and_requests() {
+    let env = Env::new().await;
+    let (org, vol) = org_and_vol_ids(&env).await;
+    let (a, o, v) = (env.admin().await, env.organizer().await, env.volunteer().await);
+    let mk_event = |title: &'static str| { let org = org.clone(); let o = o.clone(); let env = &env; async move {
+        let d = env.ok(Some(&o), "mutation($org:ID!,$t:String!){createEvent(title:$t,description:\"Описание\",location:\"Место\",startDate:\"2026-12-01\",endDate:\"2026-12-01\",requiredVolunteers:5,plannedHours:2,organizationId:$org){id}}", json!({"org": org, "t": title})).await;
+        d["createEvent"]["id"].as_str().unwrap().to_string()
+    } };
+    let accept = |ev: String| { let a = a.clone(); let env = &env; async move { env.ok(Some(&a), "mutation($e:ID!){moderateEvent(eventId:$e,status:ACCEPTED){status}}", json!({"e": ev})).await; } };
+    let sub = "mutation($v:ID!,$e:ID!){submitEventRequest(volonteerId:$v,eventId:$e){id status}}";
+
+    // --- заявка ACCEPTED → CANCELLED: организатор отзывает, волонтёр отказывается
+    let e1 = mk_event("Событие для отмены заявок").await;
+    accept(e1.clone()).await;
+    let r1 = env.ok(Some(&v), sub, json!({"v": vol, "e": e1})).await["submitEventRequest"]["id"].as_str().unwrap().to_string();
+    env.ok(Some(&o), "mutation($r:ID!){moderateRequest(requestId:$r,status:ACCEPTED){status}}", json!({"r": r1})).await;
+    let d = env.ok(Some(&v), "mutation($r:ID!){cancelEventRequest(requestId:$r){status}}", json!({"r": r1})).await;
+    assert_eq!(d["cancelEventRequest"]["status"], "CANCELLED", "волонтёр может отказаться от принятой заявки");
+    let (_, code) = env.err(Some(&v), "mutation($r:ID!){cancelEventRequest(requestId:$r){status}}", json!({"r": r1})).await;
+    assert_eq!(code, "CONFLICT", "повторно отменить нельзя");
+
+    // --- организатор отзывает принятую заявку с причиной
+    let e2 = mk_event("Событие для отзыва заявки").await;
+    accept(e2.clone()).await;
+    let r2 = env.ok(Some(&v), sub, json!({"v": vol, "e": e2})).await["submitEventRequest"]["id"].as_str().unwrap().to_string();
+    env.ok(Some(&o), "mutation($r:ID!){moderateRequest(requestId:$r,status:ACCEPTED){status}}", json!({"r": r2})).await;
+    let d = env.ok(Some(&o), "mutation($r:ID!){moderateRequest(requestId:$r,status:CANCELLED,rejectionReason:\"Нет мест\"){status rejectionReason}}", json!({"r": r2})).await;
+    assert_eq!(d["moderateRequest"]["status"], "CANCELLED");
+    assert_eq!(d["moderateRequest"]["rejectionReason"], "Нет мест");
+
+    // --- отмена принятого события каскадом отменяет открытые и принятые заявки
+    let e3 = mk_event("Событие для отмены").await;
+    accept(e3.clone()).await;
+    let ra = env.ok(Some(&v), sub, json!({"v": vol, "e": e3})).await["submitEventRequest"]["id"].as_str().unwrap().to_string();
+    env.ok(Some(&o), "mutation($r:ID!){moderateRequest(requestId:$r,status:ACCEPTED){status}}", json!({"r": ra})).await;
+    let other_vol = env.ok(Some(&a), "{ volonteers { id } }", json!({})).await["volonteers"].as_array().unwrap().iter().map(|x| x["id"].as_str().unwrap().to_string()).find(|x| *x != vol).unwrap();
+    let rb = env.ok(Some(&a), sub, json!({"v": other_vol, "e": e3})).await["submitEventRequest"]["id"].as_str().unwrap().to_string();
+    let cancel = "mutation($e:ID!,$r:String){cancelEvent(eventId:$e,reason:$r){status cancelReason}}";
+    let (_, code) = env.err(Some(&v), cancel, json!({"e": e3, "r": null})).await;
+    assert_eq!(code, "FORBIDDEN", "волонтёр не отменяет события");
+    let d = env.ok(Some(&o), cancel, json!({"e": e3, "r": "Плохая погода"})).await;
+    assert_eq!(d["cancelEvent"]["status"], "CANCELLED");
+    assert_eq!(d["cancelEvent"]["cancelReason"], "Плохая погода");
+    for r in [&ra, &rb] {
+        let (st, reason): (String, Option<String>) = sqlx::query_as("SELECT status::text, rejection_reason FROM volonteer_event_requests WHERE id = $1::uuid").bind(r).fetch_one(&env.pool).await.unwrap();
+        assert_eq!(st, "CANCELLED", "заявки отменённого события отменяются");
+        assert_eq!(reason.as_deref(), Some("Плохая погода"));
+    }
+    let (_, code) = env.err(Some(&o), cancel, json!({"e": e3, "r": null})).await;
+    assert_eq!(code, "CONFLICT", "отменённое событие повторно не отменяется");
+    // из каталога отменённое событие исчезает для гостя
+    let seen = env.ok(None, "query($id:ID!){event(id:$id){id}}", json!({"id": e3})).await;
+    assert!(seen["event"].is_null());
+
+    // --- нельзя отменить событие, по которому уже подтверждены часы
+    let e4 = mk_event("Событие с часами").await;
+    accept(e4.clone()).await;
+    let r4 = env.ok(Some(&v), sub, json!({"v": vol, "e": e4})).await["submitEventRequest"]["id"].as_str().unwrap().to_string();
+    env.ok(Some(&o), "mutation($r:ID!){moderateRequest(requestId:$r,status:ACCEPTED){status}}", json!({"r": r4})).await;
+    env.ok(Some(&o), "mutation($r:ID!){confirmVolunteerWork(requestId:$r,confirmedHours:2){status}}", json!({"r": r4})).await;
+    let (m, code) = env.err(Some(&o), cancel, json!({"e": e4, "r": null})).await;
+    assert_eq!(code, "CONFLICT");
+    assert!(m.contains("подтверждены"), "{m}");
+    // и принятую-подтверждённую заявку отменить нельзя
+    let (_, code) = env.err(Some(&v), "mutation($r:ID!){cancelEventRequest(requestId:$r){status}}", json!({"r": r4})).await;
+    assert_eq!(code, "CONFLICT");
+
+    // --- черновик организатор отменяет сам; закрытое событие отменить нельзя
+    let e5 = mk_event("Черновик").await;
+    assert_eq!(env.ok(Some(&o), cancel, json!({"e": e5, "r": null})).await["cancelEvent"]["status"], "CANCELLED");
+    env.ok(Some(&o), "mutation($e:ID!){closeEvent(eventId:$e){status}}", json!({"e": e4})).await;
+    let (_, code) = env.err(Some(&o), cancel, json!({"e": e4, "r": null})).await;
+    assert_eq!(code, "CONFLICT");
+
+    // --- прямой SQL: принятую заявку закрытого события отменить нельзя
+    sqlx::query("UPDATE volonteer_event_requests SET status = 'ACCEPTED', confirmed_hours = NULL WHERE id = $1::uuid").bind(&r4).execute(&env.pool).await.unwrap_err();
+    env.cleanup().await;
+}
+
+// ------------------------------------------------------------------------------------------------
+/// 152-ФЗ: выгрузка данных, удаление учётной записи с обезличиванием.
+#[tokio::test]
+async fn privacy_export_and_account_deletion() {
+    let env = Env::new().await;
+    let v = env.volunteer().await;
+
+    // выгрузка содержит данные пользователя и записывается в журнал
+    let d = env.ok(Some(&v), "mutation{exportMyData}", json!({})).await;
+    let doc: Value = serde_json::from_str(d["exportMyData"].as_str().unwrap()).unwrap();
+    assert_eq!(doc["account"]["email"], "volunteer@donstu.ru");
+    assert_eq!(doc["account"]["role"], "VOLUNTEER");
+    assert!(doc["volunteerProfile"]["phone"].is_string());
+    assert!(doc["eventRequests"].as_array().unwrap().len() >= 2);
+    assert!(doc["account"].get("password_hash").is_none() && !d["exportMyData"].as_str().unwrap().contains("argon2"), "хэш пароля не выгружается");
+    assert!(doc["activityLog"].as_array().unwrap().iter().any(|x| x["action"] == "account.export" || x["action"] == "auth.login"));
+    let (_, code) = env.err(None, "mutation{exportMyData}", json!({})).await;
+    assert_eq!(code, "UNAUTHENTICATED");
+
+    // метка с контактом, созданная волонтёром, — чтобы проверить обезличивание
+    env.ok(Some(&v), "mutation{createMapMarker(input:{type:REGULAR,title:\"Помощь с покупками\",description:\"Нужна помощь\",lat:47.2,lng:39.7,urgency:LOW,contactPhone:\"+7 900 000-00-00\"}){id}}", json!({})).await;
+
+    // удаление: нужен верный пароль
+    let del = "mutation($p:String!){deleteMyAccount(password:$p)}";
+    let (m, _) = env.err(Some(&v), del, json!({"p": "wrong-pass1"})).await;
+    assert!(m.contains("Пароль"), "{m}");
+    env.ok(Some(&v), del, json!({"p": "vol123"})).await;
+
+    // старая сессия и повторный вход невозможны
+    let me = env.ok(Some(&v), "{ me { id } }", json!({})).await;
+    assert!(me["me"].is_null(), "сессия удалённого пользователя недействительна");
+    let (_, code) = env.err(None, "mutation{login(email:\"volunteer@donstu.ru\",password:\"vol123\"){token}}", json!({})).await;
+    assert_eq!(code, "BAD_USER_INPUT");
+
+    // персональные данные обезличены; обезличенные часы остаются у организатора
+    let (first, last, birth): (String, String, Option<chrono::NaiveDate>) = sqlx::query_as(
+        "SELECT p.first_name, p.last_name, p.birth_date FROM users u JOIN persons p ON p.id = u.person_id WHERE u.deleted_at IS NOT NULL").fetch_one(&env.pool).await.unwrap();
+    assert_eq!((first.as_str(), last.as_str()), ("пользователь", "Удалённый"));
+    assert!(birth.is_none());
+    let (email, phone, student): (String, String, Option<String>) = sqlx::query_as("SELECT email, phone, student_id FROM volonteers WHERE email LIKE 'deleted-%'").fetch_one(&env.pool).await.unwrap();
+    assert!(email.ends_with("@deleted.invalid") && phone.is_empty() && student.is_none());
+    let reviews: i64 = sqlx::query_scalar("SELECT count(*) FROM event_reviews rv JOIN volonteers v ON v.id = rv.volonteer_id WHERE v.email LIKE 'deleted-%'").fetch_one(&env.pool).await.unwrap();
+    assert_eq!(reviews, 0, "отзывы удалены");
+    let (open,): (i64,) = sqlx::query_as("SELECT count(*) FROM volonteer_event_requests r JOIN volonteers v ON v.id = r.volonteer_id WHERE v.email LIKE 'deleted-%' AND r.status IN ('OPEN','ACCEPTED')").fetch_one(&env.pool).await.unwrap();
+    assert_eq!(open, 0, "активные заявки отменены");
+    let confirmed: i64 = sqlx::query_scalar("SELECT count(*) FROM volonteer_event_requests r JOIN volonteers v ON v.id = r.volonteer_id WHERE v.email LIKE 'deleted-%' AND r.status = 'CONFIRMED'").fetch_one(&env.pool).await.unwrap();
+    assert!(confirmed >= 1, "подтверждённые часы остаются обезличенными");
+    let (mphone, mname): (Option<String>, String) = sqlx::query_as("SELECT contact_phone, created_by_name FROM map_markers WHERE title = 'Помощь с покупками'").fetch_one(&env.pool).await.unwrap();
+    assert!(mphone.is_none());
+    assert_eq!(mname, "Удалённый пользователь");
+    let leaked: i64 = sqlx::query_scalar("SELECT count(*) FROM persons WHERE last_name = 'Иванов' AND first_name = 'Алексей'").fetch_one(&env.pool).await.unwrap();
+    assert_eq!(leaked, 0, "имя пользователя нигде не осталось");
+
+    // организатор с активными событиями не может удалить аккаунт; администратор — тоже
+    let o = env.organizer().await;
+    let (m, code) = env.err(Some(&o), del, json!({"p": "org123"})).await;
+    assert_eq!(code, "CONFLICT", "{m}");
+    let (_, code) = env.err(Some(&env.admin().await), del, json!({"p": "admin123"})).await;
+    assert_eq!(code, "BAD_USER_INPUT");
     env.cleanup().await;
 }

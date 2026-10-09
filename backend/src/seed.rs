@@ -72,14 +72,21 @@ pub async fn run(pool: &PgPool, reset: bool) -> Result<()> {
     }
     // учётные записи
     for u in &demo.users {
-        let pid = Uuid::new_v5(&NS, format!("person:{}", u.key).as_bytes());
-        sqlx::query("INSERT INTO persons (id, first_name, last_name) VALUES ($1,$2,$3)").bind(pid).bind(&u.first).bind(&u.last).execute(&mut *tx).await?;
+        // у учётной записи волонтёра та же персона, что и у карточки волонтёра (как при самостоятельной регистрации)
+        let pid = match &u.vol {
+            Some(v) => Uuid::new_v5(&NS, format!("person:{v}").as_bytes()),
+            None => {
+                let pid = Uuid::new_v5(&NS, format!("person:{}", u.key).as_bytes());
+                sqlx::query("INSERT INTO persons (id, first_name, last_name) VALUES ($1,$2,$3)").bind(pid).bind(&u.first).bind(&u.last).execute(&mut *tx).await?;
+                pid
+            }
+        };
         let pw = u.password.clone();
         let hash = tokio::task::spawn_blocking(move || auth::hash_password(&pw)).await??;
         let role: &str = &u.role;
-        sqlx::query("INSERT INTO users (id, person_id, email, password_hash, role, organization_id, volonteer_id, created_at) VALUES ($1,$2,$3,$4,$5::user_role,$6,$7,$8)")
+        sqlx::query("INSERT INTO users (id, person_id, email, password_hash, role, organization_id, volonteer_id, created_at, consent_version, consent_at) VALUES ($1,$2,$3,$4,$5::user_role,$6,$7,$8,$9,now())")
             .bind(id(&u.key)).bind(pid).bind(&u.email).bind(hash).bind(role)
-            .bind(u.org.as_deref().map(id)).bind(u.vol.as_deref().map(id)).bind(ts(&u.created_at)?).execute(&mut *tx).await?;
+            .bind(u.org.as_deref().map(id)).bind(u.vol.as_deref().map(id)).bind(ts(&u.created_at)?).bind(crate::svc::PRIVACY_POLICY_VERSION).execute(&mut *tx).await?;
     }
     // события: создаём DRAFT, затем доводим до нужного статуса по правилам автомата
     for e in &demo.events {
@@ -120,6 +127,8 @@ pub async fn run(pool: &PgPool, reset: bool) -> Result<()> {
     }
     // метки карты
     for (n, m) in demo.markers.iter().enumerate() {
+        // закрытые ПСО в системе не хранятся (решение заказчика) — в демо-данные не попадают
+        if m.kind == "SEARCH_RESCUE" && matches!(m.status.as_str(), "FOUND" | "CLOSED") { continue; }
         let creator = m.by_vol.as_deref().and_then(|v| demo.users.iter().find(|u| u.vol.as_deref() == Some(v))).map(|u| id(&u.key));
         let seen = m.seen_date.as_deref().map(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d")).transpose()?;
         sqlx::query("INSERT INTO map_markers (id, type, title, description, lat, lng, urgency, contact_phone, last_seen_date, last_seen_location, created_by, created_by_name, created_at)
@@ -166,8 +175,8 @@ pub async fn create_admin(pool: &PgPool, email: &str, last: &str, first: &str, p
     let hash = tokio::task::spawn_blocking(move || auth::hash_password(&pw)).await??;
     let mut tx = pool.begin().await?;
     let pid: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name) VALUES ($1,$2) RETURNING id").bind(first).bind(last).fetch_one(&mut *tx).await?;
-    let uid: Uuid = sqlx::query_scalar("INSERT INTO users (person_id, email, password_hash, role) VALUES ($1,$2,$3,'ADMIN') RETURNING id")
-        .bind(pid).bind(&email).bind(hash).fetch_one(&mut *tx).await.context("не удалось создать администратора (email занят?)")?;
+    let uid: Uuid = sqlx::query_scalar("INSERT INTO users (person_id, email, password_hash, role, consent_version, consent_at) VALUES ($1,$2,$3,'ADMIN',$4,now()) RETURNING id")
+        .bind(pid).bind(&email).bind(hash).bind(crate::svc::PRIVACY_POLICY_VERSION).fetch_one(&mut *tx).await.context("не удалось создать администратора (email занят?)")?;
     sqlx::query("INSERT INTO audit_log (actor_role, action, entity, entity_id) VALUES ('ADMIN', 'admin.created_via_cli', 'user', $1)").bind(uid).execute(&mut *tx).await?;
     tx.commit().await?;
     tracing::info!("администратор {email} создан");

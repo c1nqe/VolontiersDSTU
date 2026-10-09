@@ -36,6 +36,11 @@ export default function OrganizerView() {
     await run(store.closeEvent(evt.id), 'Событие закрыто. Участники могут оставить отзывы.');
   };
 
+  const revokeRequest = async (req) => {
+    if (!window.confirm(`Отозвать принятую заявку волонтёра ${req.volonteerName}? Он увидит, что участие отменено.`)) return;
+    await run(store.moderateRequest(req.id, 'CANCELLED'), 'Заявка отозвана', 'info');
+  };
+
   const confirmWork = async (req) => {
     const hours = Number(hoursDraft[req.id] ?? req.requestedHours) || 0;
     if (hours <= 0) {
@@ -82,13 +87,19 @@ export default function OrganizerView() {
               onShowReviews={(e) => openModal('reviews', { eventId: e.id })}
               actions={
                 evt.status === 'ACCEPTED' ? (
-                  <button type="button" className="btn btn-outline btn-sm" onClick={() => closeEvent(evt)}>Закрыть событие</button>
+                  <>
+                    <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => openModal('cancelEvent', { eventId: evt.id })}>Отменить</button>
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => closeEvent(evt)}>Закрыть событие</button>
+                  </>
                 ) : evt.status === 'CLOSED' ? (
                   <button type="button" className="btn btn-outline btn-sm" onClick={() => openModal('reviews', { eventId: evt.id })}>
                     <Icon name="message" /> Отзывы ({evt.reviewsCount})
                   </button>
                 ) : evt.status === 'DRAFT' ? (
-                  <span className="text-warning">На модерации</span>
+                  <>
+                    <span className="text-warning">На модерации</span>
+                    <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => openModal('cancelEvent', { eventId: evt.id })}>Отозвать</button>
+                  </>
                 ) : null
               }
             />
@@ -109,7 +120,10 @@ export default function OrganizerView() {
                   <td><strong>{r.volonteerName}</strong></td>
                   <td>{r.volonteerFaculty}</td>
                   <td>{formatDate(r.createdAt)}</td>
-                  <td><span className={`badge ${REQUEST_STATUS[r.status].badge}`}>{REQUEST_STATUS[r.status].label}</span></td>
+                  <td>
+                    <span className={`badge ${REQUEST_STATUS[r.status].badge}`}>{REQUEST_STATUS[r.status].label}</span>
+                    {r.status === 'CANCELLED' && r.rejectionReason && <div className="cell-sub">{r.rejectionReason}</div>}
+                  </td>
                   <td>
                     {r.status === 'OPEN' ? (
                       <div className="btn-row">
@@ -117,7 +131,10 @@ export default function OrganizerView() {
                         <button type="button" className="btn btn-danger btn-sm" onClick={() => run(store.moderateRequest(r.id, 'CANCELLED'), 'Заявка отклонена', 'error')}>Отклонить</button>
                       </div>
                     ) : r.status === 'ACCEPTED' ? (
-                      <span className="text-info">Ожидает подтверждения часов</span>
+                      <div className="btn-row">
+                        <span className="text-info">Ожидает подтверждения часов</span>
+                        <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => revokeRequest(r)}>Отозвать</button>
+                      </div>
                     ) : (
                       <span className="muted">Обработано</span>
                     )}

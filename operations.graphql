@@ -8,10 +8,11 @@
 # ---------- Загрузка данных (один запрос на весь кэш фронтенда) ----------------
 # Что именно придёт, зависит от роли: гость не получит черновики, заявки, контакты и дату рождения.
 query Hydrate {
-  me { id firstName lastName email role createdAt organizationId volonteerId }
+  me { id firstName lastName email role createdAt organizationId volonteerId consentAcceptedAt consentVersion }
   session { expiresAt }
+  privacyPolicyVersion
   events {
-    id title description location startDate endDate requiredVolunteers plannedHours status
+    id title description location startDate endDate requiredVolunteers plannedHours status cancelReason
     organizationId organizationName requestsCount approvedVolunteersCount ratingAvg reviewsCount createdAt
   }
   organizations { id name inn contactPerson email phone description createdAt }
@@ -32,12 +33,16 @@ query Hydrate {
 mutation Login($email: String!, $password: String!) {
   login(email: $email, password: $password) { user { id firstName lastName email role } expiresAt }
 }
-mutation Register($firstName: String!, $lastName: String!, $email: String!, $password: String!, $role: UserRole!) {
-  register(firstName: $firstName, lastName: $lastName, email: $email, password: $password, role: $role) {
+# consent — согласие на обработку персональных данных (обязательно); organizationName — для организатора
+mutation Register($firstName: String!, $lastName: String!, $email: String!, $password: String!, $role: UserRole!, $consent: Boolean!, $organizationName: String) {
+  register(firstName: $firstName, lastName: $lastName, email: $email, password: $password, role: $role, consent: $consent, organizationName: $organizationName) {
     user { id role } expiresAt
   }
 }
 mutation Logout { logout }
+# 152-ФЗ: выгрузка всех данных о себе (JSON) и удаление учётной записи с обезличиванием
+mutation ExportMyData { exportMyData }
+mutation DeleteMyAccount($password: String!) { deleteMyAccount(password: $password) }
 mutation ChangePassword($old: String!, $new: String!) { changePassword(oldPassword: $old, newPassword: $new) }
 
 # ---------- Администратор ------------------------------------------------------
@@ -71,12 +76,14 @@ mutation ModerateRequest($requestId: ID!, $status: RequestStatus!, $rejectionRea
 mutation ConfirmVolunteerWork($requestId: ID!, $confirmedHours: Float!) {
   confirmVolunteerWork(requestId: $requestId, confirmedHours: $confirmedHours) { id status confirmedHours }
 }
+# DRAFT | ACCEPTED → CANCELLED (заявки принятого события отменяются автоматически)
+mutation CancelEvent($eventId: ID!, $reason: String) { cancelEvent(eventId: $eventId, reason: $reason) { id status cancelReason } }
 # ACCEPTED → CLOSED
 mutation CloseEvent($eventId: ID!) { closeEvent(eventId: $eventId) { id status } }
 
 # ---------- Волонтёр -----------------------------------------------------------
 mutation SubmitEventRequest($volonteerId: ID!, $eventId: ID!) { submitEventRequest(volonteerId: $volonteerId, eventId: $eventId) { id status } }
-# OPEN → CANCELLED
+# OPEN | ACCEPTED → CANCELLED
 mutation CancelEventRequest($requestId: ID!) { cancelEventRequest(requestId: $requestId) { id status } }
 mutation SubmitEventReview($eventId: ID!, $volonteerId: ID!, $rating: Int!, $text: String!) {
   submitEventReview(eventId: $eventId, volonteerId: $volonteerId, rating: $rating, text: $text) { id }

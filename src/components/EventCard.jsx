@@ -36,6 +36,9 @@ export default function EventCard({
         <div className="event-org"><Icon name="building" /> <span>{event.organizationName}</span></div>
       )}
       <p className="event-desc">{event.description}</p>
+      {event.status === 'CANCELLED' && event.cancelReason && (
+        <p className="cancel-note">Причина отмены: {event.cancelReason}</p>
+      )}
 
       <ul className="event-meta">
         <li><Icon name="mapPin" /> <span>{event.location}</span></li>

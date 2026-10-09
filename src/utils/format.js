@@ -15,7 +15,7 @@ export const REQUEST_STATUS = {
   OPEN: { badge: 'badge-pending', label: 'На рассмотрении' },
   ACCEPTED: { badge: 'badge-accepted', label: 'Одобрена' },
   CONFIRMED: { badge: 'badge-confirmed', label: 'Часы подтверждены' },
-  CANCELLED: { badge: 'badge-cancelled', label: 'Отклонена' },
+  CANCELLED: { badge: 'badge-cancelled', label: 'Отменена' },
 };
 
 export const URGENCY = {

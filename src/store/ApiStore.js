@@ -16,8 +16,8 @@ export { MAX_MARKER_PHOTOS, MAX_REVIEW_LENGTH } from './constants.js';
 
 const UI_KEY = 'volontiers_ui_v2';
 
-const USER = 'id firstName lastName email role createdAt organizationId volonteerId';
-const EVENT = 'id title description location startDate endDate requiredVolunteers plannedHours status organizationId organizationName requestsCount approvedVolunteersCount ratingAvg reviewsCount createdAt';
+const USER = 'id firstName lastName email role createdAt organizationId volonteerId consentAcceptedAt consentVersion';
+const EVENT = 'id title description location startDate endDate requiredVolunteers plannedHours status cancelReason organizationId organizationName requestsCount approvedVolunteersCount ratingAvg reviewsCount createdAt';
 const ORG = 'id name inn contactPerson email phone description createdAt';
 const VOL = 'id fullName firstName lastName email phone birthDate studentId faculty totalConfirmedHours createdAt';
 const REQ = 'id volonteerId volonteerName volonteerFaculty volonteerStudentId eventId eventTitle eventDate eventStatus organizationName status requestedHours confirmedHours rejectionReason createdAt updatedAt';
@@ -29,6 +29,7 @@ const MARKER = `id type status title description lat lng urgency contactPhone la
 export const HYDRATE_QUERY = `query Hydrate {
   me { ${USER} }
   session { expiresAt }
+  privacyPolicyVersion
   events { ${EVENT} }
   organizations { ${ORG} }
   volonteers { ${VOL} }
@@ -37,7 +38,7 @@ export const HYDRATE_QUERY = `query Hydrate {
   mapMarkers { ${MARKER} }
 }`;
 
-const EMPTY = () => ({ user: null, expiresAt: null, events: [], organizations: [], volonteers: [], requests: [], reviews: [], markers: [] });
+const EMPTY = () => ({ user: null, expiresAt: null, policyVersion: null, events: [], organizations: [], volonteers: [], requests: [], reviews: [], markers: [] });
 
 function normalizeUser(u) {
   return u ? { ...u, volunteerId: u.volonteerId, orgId: u.organizationId } : null;
@@ -103,6 +104,7 @@ export class ApiStore {
       this.state = {
         user: normalizeUser(d.me),
         expiresAt: d.session?.expiresAt || null,
+        policyVersion: d.privacyPolicyVersion || null,
         events: d.events || [],
         organizations: d.organizations || [],
         volonteers: d.volonteers || [],
@@ -148,11 +150,16 @@ export class ApiStore {
     return res.success ? { success: true, user: normalizeUser(res.data.user) } : res;
   }
 
-  async register({ firstName, lastName, email, password, role }) {
+  /** consent — согласие на обработку персональных данных (обязательно); organizationName — только для организатора. */
+  async register({ firstName, lastName, email, password, role, consent, organizationName }) {
+    if (!consent) return { success: false, message: 'Для регистрации необходимо согласие на обработку персональных данных' };
     const res = await this.mutate(
-      `mutation($firstName:String!,$lastName:String!,$email:String!,$password:String!,$role:UserRole!){
-        register(firstName:$firstName,lastName:$lastName,email:$email,password:$password,role:$role){ user { ${USER} } expiresAt } }`,
-      { firstName, lastName, email: String(email).trim(), password, role },
+      `mutation($firstName:String!,$lastName:String!,$email:String!,$password:String!,$role:UserRole!,$consent:Boolean!,$organizationName:String){
+        register(firstName:$firstName,lastName:$lastName,email:$email,password:$password,role:$role,consent:$consent,organizationName:$organizationName){ user { ${USER} } expiresAt } }`,
+      {
+        firstName, lastName, email: String(email).trim(), password, role, consent: true,
+        organizationName: role === 'ORGANIZER' ? (String(organizationName || '').trim() || null) : null,
+      },
       'register',
     );
     return res.success ? { success: true, user: normalizeUser(res.data.user) } : res;
@@ -163,6 +170,28 @@ export class ApiStore {
     this.ui.currentRole = 'PUBLIC';
     this.saveUi();
     await this.refresh();
+  }
+
+  getPolicyVersion() { return this.state.policyVersion; }
+
+  /** Все данные пользователя о нём самом (JSON-текст) — право на доступ к данным. */
+  async exportMyData() {
+    try {
+      const d = await this.client('mutation{ exportMyData }');
+      return { success: true, json: d.exportMyData, fileName: `moi-dannye-volontery-${new Date().toISOString().slice(0, 10)}.json` };
+    } catch (e) {
+      return { success: false, message: e.message };
+    }
+  }
+
+  /** Удаляет учётную запись с немедленным обезличиванием данных; после успеха пользователь — гость. */
+  async deleteMyAccount(password) {
+    const res = await this.mutate('mutation($password:String!){ deleteMyAccount(password:$password) }', { password });
+    if (res.success) {
+      this.ui.currentRole = 'PUBLIC';
+      this.saveUi();
+    }
+    return res;
   }
 
   // ---------- Роли и активные профили (настройки интерфейса) ----------
@@ -286,6 +315,15 @@ export class ApiStore {
         requiredVolunteers: Number(e.requiredVolunteers), plannedHours: Number(e.plannedHours), organizationId: e.organizationId,
       },
       'createEvent',
+    );
+  }
+
+  /** DRAFT | ACCEPTED → CANCELLED; заявки принятого события сервер отменяет автоматически. */
+  cancelEvent(eventId, reason = null) {
+    return this.mutate(
+      'mutation($eventId:ID!,$reason:String){ cancelEvent(eventId:$eventId,reason:$reason){ id status cancelReason } }',
+      { eventId, reason: reason ? String(reason).trim() || null : null },
+      'cancelEvent',
     );
   }
 

@@ -42,6 +42,10 @@ type Event {
 	requiredVolunteers: Int!
 	plannedHours: Float!
 	status: EventStatus!
+	"""
+	Причина отмены (только у отменённых событий).
+	"""
+	cancelReason: String
 	organizationId: ID!
 	organizationName: String!
 	requestsCount: Int!
@@ -125,13 +129,25 @@ enum MapMarkerType {
 }
 
 type Mutation {
-	register(firstName: String!, lastName: String!, email: String!, password: String!, role: UserRole!): AuthPayload!
+	"""
+	Регистрация волонтёра или организатора. `consent` — согласие на обработку персональных данных (обязательно).
+	Для организатора можно указать название организации.
+	"""
+	register(firstName: String!, lastName: String!, email: String!, password: String!, role: UserRole!, consent: Boolean!, organizationName: String): AuthPayload!
 	login(email: String!, password: String!): AuthPayload!
 	"""
 	Завершает все сессии пользователя (token_version++), очищает cookie.
 	"""
 	logout: Boolean!
 	changePassword(oldPassword: String!, newPassword: String!): Boolean!
+	"""
+	Все данные пользователя о нём самом в виде JSON (право на доступ к данным, 152-ФЗ).
+	"""
+	exportMyData: String!
+	"""
+	Удаление учётной записи с немедленным обезличиванием персональных данных. Требует пароль.
+	"""
+	deleteMyAccount(password: String!): Boolean!
 	registerOrganization(name: String!, contactPerson: String!, email: String!, phone: String!, inn: String, description: String): Organization!
 	registerVolonteer(fullName: String!, email: String!, phone: String!, studentId: String, faculty: String, birthDate: String): Volonteer!
 	"""
@@ -140,7 +156,7 @@ type Mutation {
 	moderateEvent(eventId: ID!, status: EventStatus!): Event!
 	createEvent(title: String!, description: String!, location: String!, startDate: String!, endDate: String!, requiredVolunteers: Int!, plannedHours: Float!, organizationId: ID!): Event!
 	"""
-	OPEN → ACCEPTED | CANCELLED
+	OPEN → ACCEPTED | CANCELLED; ACCEPTED → CANCELLED (отзыв принятой заявки)
 	"""
 	moderateRequest(requestId: ID!, status: RequestStatus!, rejectionReason: String): VolonteerEventRequest!
 	"""
@@ -148,12 +164,16 @@ type Mutation {
 	"""
 	confirmVolunteerWork(requestId: ID!, confirmedHours: Float!): VolonteerEventRequest!
 	"""
+	DRAFT | ACCEPTED → CANCELLED. Заявки принятого события отменяются автоматически.
+	"""
+	cancelEvent(eventId: ID!, reason: String): Event!
+	"""
 	ACCEPTED → CLOSED
 	"""
 	closeEvent(eventId: ID!): Event!
 	submitEventRequest(volonteerId: ID!, eventId: ID!, description: String): VolonteerEventRequest!
 	"""
-	OPEN → CANCELLED
+	OPEN | ACCEPTED → CANCELLED (волонтёр отказывается от участия)
 	"""
 	cancelEventRequest(requestId: ID!): VolonteerEventRequest!
 	submitEventReview(eventId: ID!, volonteerId: ID!, rating: Int!, text: String!): EventReview!
@@ -166,7 +186,7 @@ type Mutation {
 	approveMarkerClose(markerId: ID!): MapMarker!
 	rejectMarkerClose(markerId: ID!, reason: String): MapMarker!
 	"""
-	Закрытие обычной метки (автор или администратор).
+	Закрытие метки (автор или администратор). Закрытая метка ПСО удаляется сразу.
 	"""
 	closeMapMarker(markerId: ID!): MapMarker!
 	deleteMapMarker(markerId: ID!): Boolean!
@@ -196,6 +216,10 @@ type Query {
 	Сессия: пользователь и срок действия.
 	"""
 	session: Session
+	"""
+	Версия действующей политики обработки персональных данных.
+	"""
+	privacyPolicyVersion: String!
 	"""
 	Список учётных записей — только администратор.
 	"""
@@ -273,6 +297,14 @@ type User {
 	createdAt: String!
 	organizationId: ID
 	volonteerId: ID
+	"""
+	Когда пользователь дал согласие на обработку персональных данных (null — не давал).
+	"""
+	consentAcceptedAt: String
+	"""
+	Версия политики обработки ПДн, с которой пользователь согласился.
+	"""
+	consentVersion: String
 }
 
 enum UserRole {

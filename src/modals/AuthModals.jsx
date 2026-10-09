@@ -4,6 +4,7 @@ import { ModalForm } from '../components/Modal.jsx';
 import { Field } from '../components/Common.jsx';
 import { useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
+import { PrivacyPolicyText } from '../components/PrivacyPolicy.jsx';
 
 // Демо-профили показываются только в режиме разработки (npm run dev) и в сборках с VITE_DEMO_ACCOUNTS=true.
 // Эти учётные записи создаёт `volontiers-server seed`; в production сид запрещён.
@@ -72,7 +73,7 @@ const ROLES = [
 export function RegisterModal({ onClose, onAuthenticated }) {
   const store = useStore();
   const { showToast, openModal } = useUI();
-  const [form, setForm] = useState({ role: 'VOLUNTEER', firstName: '', lastName: '', email: '', password: '' });
+  const [form, setForm] = useState({ role: 'VOLUNTEER', firstName: '', lastName: '', email: '', password: '', organizationName: '', consent: false });
   const bind = (k) => ({ value: form[k], onChange: (e) => setForm((f) => ({ ...f, [k]: e.target.value })) });
 
   const submit = async () => {
@@ -117,12 +118,25 @@ export function RegisterModal({ onClose, onAuthenticated }) {
         <Field label="Имя" required><input className="form-input" required placeholder="Иван" autoComplete="given-name" {...bind('firstName')} /></Field>
         <Field label="Фамилия" required><input className="form-input" required placeholder="Петров" autoComplete="family-name" {...bind('lastName')} /></Field>
       </div>
+      {form.role === 'ORGANIZER' && (
+        <Field label="Название организации" hint="Оставьте пустым, чтобы указать позже. Организация видна всем в карточках событий.">
+          <input className="form-input" maxLength={200} placeholder="Например: Клуб «Добрые руки»" {...bind('organizationName')} />
+        </Field>
+      )}
       <Field label="Электронная почта" required>
         <input type="email" className="form-input" required placeholder="ivan.petrov@donstu.ru" autoComplete="email" {...bind('email')} />
       </Field>
       <Field label="Пароль" required hint="Не менее 8 символов: буквы и хотя бы одна цифра или спецсимвол">
         <input type="password" className="form-input" minLength={8} maxLength={128} required autoComplete="new-password" {...bind('password')} />
       </Field>
+      <label className="consent-row">
+        <input type="checkbox" required checked={form.consent} onChange={(e) => setForm((f) => ({ ...f, consent: e.target.checked }))} />
+        <span>Я даю согласие на обработку моих персональных данных на условиях политики обработки данных (152-ФЗ)</span>
+      </label>
+      <details className="consent-details">
+        <summary>Прочитать условия обработки данных</summary>
+        <PrivacyPolicyText version={store.getPolicyVersion()} />
+      </details>
     </ModalForm>
   );
 }

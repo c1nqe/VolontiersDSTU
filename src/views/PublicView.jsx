@@ -41,7 +41,7 @@ export default function PublicView() {
     if (user.role !== 'VOLUNTEER') return <span className="badge badge-accepted">Активно</span>;
     const req = myRequests.find((r) => r.eventId === evt.id);
     if (!req) return <button type="button" className="btn btn-primary btn-sm" onClick={() => apply(evt.id)}>Подать заявку</button>;
-    const labels = { ACCEPTED: 'Вы приняты!', CONFIRMED: `Часы: ${req.confirmedHours} ч`, CANCELLED: 'Отклонена', OPEN: 'Заявка на рассмотрении' };
+    const labels = { ACCEPTED: 'Вы приняты!', CONFIRMED: `Часы: ${req.confirmedHours} ч`, CANCELLED: 'Заявка отменена', OPEN: 'Заявка на рассмотрении' };
     return <span className={`badge ${REQUEST_STATUS[req.status].badge}`}>{labels[req.status]}</span>;
   };
 

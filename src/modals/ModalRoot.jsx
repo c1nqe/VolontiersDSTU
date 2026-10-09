@@ -10,6 +10,9 @@ const REGISTRY = {
   addMarker: lazy(() => import('./AddMarkerModal.jsx')),
   closeSearch: lazy(() => import('./CloseSearchMarkerModal.jsx')),
   reviews: lazy(() => import('./EventReviewsModal.jsx')),
+  privacy: lazy(() => import('./PrivacyModal.jsx')),
+  cancelEvent: lazy(() => import('./CancelEventModal.jsx')),
+  deleteAccount: lazy(() => import('./DeleteAccountModal.jsx')),
 };
 
 /** Рендерит текущее модальное окно. Одновременно открыто не больше одного. */

@@ -28,6 +28,7 @@ export default function AdminView() {
   const vols = store.getVolunteers();
   const events = store.getEvents();
   const pendingEvents = events.filter((e) => e.status === 'DRAFT');
+  const activeEvents = events.filter((e) => e.status === 'ACCEPTED');
   const pendingMarkers = store.getPendingMarkerApprovals();
   const allReviews = store.getAllReviews();
   const eventTitle = (id) => events.find((e) => e.id === id)?.title || 'Мероприятие удалено';
@@ -41,7 +42,7 @@ export default function AdminView() {
     { id: 'registry', label: 'Общий реестр', icon: 'fileText' },
   ];
 
-  const approveMarker = (m) => run(store.approveMarkerClose(m.id), 'Завершение поисковой операции одобрено, статус метки обновлён.');
+  const approveMarker = (m) => run(store.approveMarkerClose(m.id), 'Завершение поисковой операции одобрено. Метка, фото и отчёт удалены из системы.');
 
   const rejectMarker = async (m) => {
     const reason = window.prompt('Укажите причину отклонения заявки на закрытие ПСО:', 'Недостаточно подтверждающих материалов / требуется повторный выезд');
@@ -88,6 +89,29 @@ export default function AdminView() {
               ))}
             </div>
           )}
+
+          {activeEvents.length > 0 && (
+            <>
+              <SectionHeader title="Согласованные события" description="Принятое событие можно отменить: заявки волонтёров будут отменены автоматически.">
+                <span className="badge badge-accepted">{activeEvents.length}</span>
+              </SectionHeader>
+              <div className="cards-grid">
+                {activeEvents.map((evt) => (
+                  <EventCard
+                    key={evt.id}
+                    event={evt}
+                    meta="admin"
+                    footerInfo={`Заявок: ${evt.requestsCount}`}
+                    actions={(
+                      <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => openModal('cancelEvent', { eventId: evt.id })}>
+                        <Icon name="cross" /> Отменить
+                      </button>
+                    )}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -95,7 +119,7 @@ export default function AdminView() {
         <>
           <SectionHeader
             title="Заявки на закрытие поисково-спасательных операций"
-            description="Проверьте фотоотчёт поисковой группы, прежде чем менять статус на «Найден»."
+            description="Проверьте фотоотчёт поисковой группы. После одобрения метка, фотографии и отчёт удаляются из системы."
           >
             <span className="badge badge-pending">{pendingMarkers.length} {pluralize(pendingMarkers.length, 'заявка', 'заявки', 'заявок')}</span>
           </SectionHeader>

@@ -22,7 +22,7 @@ export default function CloseSearchMarkerModal({ onClose, markerId, targetStatus
     if (!photos[0]) { showToast('Прикрепите подтверждающую фотографию', 'error'); return; }
     const res = await store.requestMarkerClose(markerId, { photo: photos[0], note: note.trim(), targetStatus: status });
     if (!res.success) { showToast(res.message, 'error'); return; }
-    showToast('Отчёт с фото направлен администратору на согласование.');
+    showToast('Отчёт с фото направлен администратору. После одобрения метка и фото будут удалены.');
     onClose();
   };
 
@@ -55,7 +55,7 @@ export default function CloseSearchMarkerModal({ onClose, markerId, targetStatus
       <Field label="Результат операции" required>
         <select className="form-select" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="FOUND">Человек найден (жив), операция завершена</option>
-          <option value="CLOSED">Поиск прекращён, метка снимается с карты</option>
+          <option value="CLOSED">Поиск прекращён</option>
         </select>
       </Field>
 

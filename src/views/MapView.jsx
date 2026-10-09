@@ -11,14 +11,12 @@ const FILTERS = [
   { id: 'SEARCH_RESCUE', label: 'Поисково-спасательные', dot: 'rescue', activeClass: 'active-danger' },
   { id: 'REGULAR', label: 'Волонтёрская помощь', dot: 'regular' },
   { id: 'PENDING_APPROVAL', label: 'На проверке', dot: 'pending' },
-  { id: 'FOUND', label: 'Завершены / найдены', dot: 'found', activeClass: 'active-accent' },
 ];
 
 const LEGEND = [
   { cls: 'panel-rescue', name: 'Поисково-спасательная (ПСО)', hint: 'Срочный поиск пропавших людей' },
   { cls: 'panel-regular', name: 'Волонтёрская помощь', hint: 'Субботники, шефство, развоз' },
   { cls: 'panel-pending', name: 'Ожидает согласования', hint: 'Прикреплено фото, рапорт у админа' },
-  { cls: 'panel-found', name: 'Человек найден / завершено', hint: 'Успешное завершение операции' },
 ];
 
 export default function MapView() {
@@ -53,7 +51,7 @@ export default function MapView() {
         <StatCard marker="rescue" label="Активные поиски" value={count((m) => m.type === 'SEARCH_RESCUE' && m.status === 'ACTIVE')} tone="rescue" sub="Поисково-спасательные операции" />
         <StatCard marker="regular" label="Волонтёрская помощь" value={count((m) => m.type === 'REGULAR' && m.status === 'ACTIVE')} tone="regular" sub="Точки социальной поддержки" />
         <StatCard marker="pending" label="На согласовании" value={count((m) => m.status === 'PENDING_APPROVAL')} tone="warning" sub="Отчёты с фото на проверке" />
-        <StatCard marker="found" label="Успешно найдены" value={count((m) => m.status === 'FOUND')} tone="accent" sub="Люди возвращены домой" />
+        <StatCard marker="found" label="Всего меток" value={all.length} tone="accent" sub="Закрытые операции с карты удаляются" />
       </StatsGrid>
 
       <div className="toolbar no-print">

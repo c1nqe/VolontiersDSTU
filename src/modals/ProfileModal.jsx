@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
 import { useStore } from '../store/StoreContext.jsx';
+import { useUI } from '../components/UIContext.jsx';
 import { formatDate } from '../utils/format.js';
 
 const ROLE_BADGE = {
@@ -11,8 +13,26 @@ const ROLE_BADGE = {
 
 export default function ProfileModal({ onClose, onLogout }) {
   const store = useStore();
+  const { showToast, openModal } = useUI();
+  const [exporting, setExporting] = useState(false);
   const user = store.getCurrentUser();
   if (!user) return null;
+
+  const downloadData = async () => {
+    setExporting(true);
+    const res = await store.exportMyData();
+    setExporting(false);
+    if (!res.success) { showToast(res.message, 'error'); return; }
+    const url = URL.createObjectURL(new Blob([res.json], { type: 'application/json;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = res.fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast('Файл с вашими данными скачан.');
+  };
 
   const badge = ROLE_BADGE[user.role] || ROLE_BADGE.VOLUNTEER;
   const expires = store.getSessionExpiry();
@@ -91,6 +111,26 @@ export default function ProfileModal({ onClose, onLogout }) {
             <div><strong>Хранение токена:</strong> HttpOnly-cookie (недоступна скриптам страницы)</div>
             <div><strong>Пароль:</strong> на сервере хранится только хэш Argon2id</div>
             <div><strong>Выход:</strong> завершает сессию на всех устройствах</div>
+          </div>
+        </div>
+
+        <div className="info-panel">
+          <div className="info-panel-title"><Icon name="shield" /> Мои данные и приватность</div>
+          <div className="info-grid">
+            <div><strong>Согласие на обработку данных:</strong> {user.consentAcceptedAt ? `${formatDate(user.consentAcceptedAt)} (политика ${user.consentVersion})` : 'не зафиксировано'}</div>
+          </div>
+          <div className="btn-row-wrap" style={{ marginTop: '0.7rem' }}>
+            <button type="button" className="btn btn-outline btn-sm" onClick={downloadData} disabled={exporting}>
+              <Icon name="download" /> Скачать мои данные
+            </button>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => openModal('privacy')}>
+              <Icon name="fileText" /> Политика обработки данных
+            </button>
+            {user.role !== 'ADMIN' && (
+              <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => openModal('deleteAccount')}>
+                <Icon name="cross" /> Удалить аккаунт
+              </button>
+            )}
           </div>
         </div>
       </div>
