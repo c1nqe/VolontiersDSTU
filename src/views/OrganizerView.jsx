@@ -2,12 +2,12 @@ import { useState } from 'react';
 import Icon from '../components/Icon.jsx';
 import EventCard from '../components/EventCard.jsx';
 import { EmptyState, StatCard, StatsGrid, Tabs } from '../components/Common.jsx';
-import { useStore } from '../store/StoreContext.jsx';
+import { useRun, useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
 import { REQUEST_STATUS, formatDate } from '../utils/format.js';
 
 const ORG_EVENT_LABEL = {
-  CREATED: 'Ожидает модерации',
+  DRAFT: 'Ожидает модерации',
   ACCEPTED: 'Одобрено, идёт набор',
   CLOSED: 'Событие закрыто',
   CANCELLED: 'Отменено',
@@ -16,6 +16,7 @@ const ORG_EVENT_LABEL = {
 export default function OrganizerView() {
   const store = useStore();
   const { showToast, openModal } = useUI();
+  const run = useRun();
   const [tab, setTab] = useState('events');
   const [hoursDraft, setHoursDraft] = useState({});
 
@@ -25,25 +26,23 @@ export default function OrganizerView() {
   const myEvents = store.getEvents().filter((e) => e.organizationId === org.id);
   const myEventIds = new Set(myEvents.map((e) => e.id));
   const myRequests = store.getRequests().filter((r) => myEventIds.has(r.eventId));
-  const pending = myRequests.filter((r) => r.status === 'PENDING');
+  const pending = myRequests.filter((r) => r.status === 'OPEN');
   const approved = myRequests.filter((r) => r.status === 'ACCEPTED' || r.status === 'CONFIRMED');
   const confirmedHours = myRequests.filter((r) => r.status === 'CONFIRMED').reduce((s, r) => s + (Number(r.confirmedHours) || 0), 0);
   const reviewsTotal = myEvents.reduce((s, e) => s + e.reviewsCount, 0);
 
-  const closeEvent = (evt) => {
+  const closeEvent = async (evt) => {
     if (!window.confirm('Закрыть событие? После закрытия волонтёры смогут получить выписку о часах и оставить отзыв.')) return;
-    store.updateEventStatus(evt.id, 'CLOSED');
-    showToast('Событие закрыто. Участники могут оставить отзывы.');
+    await run(store.closeEvent(evt.id), 'Событие закрыто. Участники могут оставить отзывы.');
   };
 
-  const confirmWork = (req) => {
+  const confirmWork = async (req) => {
     const hours = Number(hoursDraft[req.id] ?? req.requestedHours) || 0;
     if (hours <= 0) {
       showToast('Укажите корректное количество отработанных часов', 'error');
       return;
     }
-    store.confirmRequestHours(req.id, hours);
-    showToast(`Факт работы подтверждён: начислено ${hours} ч.`);
+    await run(store.confirmRequestHours(req.id, hours), `Факт работы подтверждён: начислено ${hours} ч.`);
   };
 
   const tabs = [
@@ -88,7 +87,7 @@ export default function OrganizerView() {
                   <button type="button" className="btn btn-outline btn-sm" onClick={() => openModal('reviews', { eventId: evt.id })}>
                     <Icon name="message" /> Отзывы ({evt.reviewsCount})
                   </button>
-                ) : evt.status === 'CREATED' ? (
+                ) : evt.status === 'DRAFT' ? (
                   <span className="text-warning">На модерации</span>
                 ) : null
               }
@@ -112,10 +111,10 @@ export default function OrganizerView() {
                   <td>{formatDate(r.createdAt)}</td>
                   <td><span className={`badge ${REQUEST_STATUS[r.status].badge}`}>{REQUEST_STATUS[r.status].label}</span></td>
                   <td>
-                    {r.status === 'PENDING' ? (
+                    {r.status === 'OPEN' ? (
                       <div className="btn-row">
-                        <button type="button" className="btn btn-accent btn-sm" onClick={() => { store.updateRequestStatus(r.id, 'ACCEPTED'); showToast('Заявка волонтёра принята!'); }}>Принять</button>
-                        <button type="button" className="btn btn-danger btn-sm" onClick={() => { store.updateRequestStatus(r.id, 'CANCELLED'); showToast('Заявка отклонена', 'error'); }}>Отклонить</button>
+                        <button type="button" className="btn btn-accent btn-sm" onClick={() => run(store.moderateRequest(r.id, 'ACCEPTED'), 'Заявка волонтёра принята!')}>Принять</button>
+                        <button type="button" className="btn btn-danger btn-sm" onClick={() => run(store.moderateRequest(r.id, 'CANCELLED'), 'Заявка отклонена', 'error')}>Отклонить</button>
                       </div>
                     ) : r.status === 'ACCEPTED' ? (
                       <span className="text-info">Ожидает подтверждения часов</span>

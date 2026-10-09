@@ -6,8 +6,6 @@ import PhotoUploader from '../components/PhotoUploader.jsx';
 import { useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
 
-const DEMO_PHOTO = 'https://images.unsplash.com/photo-1544027993-37dbfe43562a?auto=format&fit=crop&w=800&q=80';
-
 /** Завершение ПСО: фотоотчёт и рапорт уходят администратору на согласование. */
 export default function CloseSearchMarkerModal({ onClose, markerId, targetStatus = 'FOUND' }) {
   const store = useStore();
@@ -19,18 +17,11 @@ export default function CloseSearchMarkerModal({ onClose, markerId, targetStatus
   const [triedSubmit, setTriedSubmit] = useState(false);
   if (!marker) return null;
 
-  const submit = () => {
+  const submit = async () => {
     setTriedSubmit(true);
     if (!photos[0]) { showToast('Прикрепите подтверждающую фотографию', 'error'); return; }
-    const user = store.getCurrentUser();
-    const res = store.requestMarkerClose(markerId, {
-      photo: photos[0],
-      note: note.trim(),
-      targetStatus: status,
-      submittedBy: user?.id || 'unknown',
-      submittedByName: user ? `${user.firstName} ${user.lastName}` : 'Волонтёр отряда',
-    });
-    if (!res) { showToast('Не удалось сохранить отчёт: хранилище браузера переполнено.', 'error'); return; }
+    const res = await store.requestMarkerClose(markerId, { photo: photos[0], note: note.trim(), targetStatus: status });
+    if (!res.success) { showToast(res.message, 'error'); return; }
     showToast('Отчёт с фото направлен администратору на согласование.');
     onClose();
   };
@@ -78,14 +69,6 @@ export default function CloseSearchMarkerModal({ onClose, markerId, targetStatus
           prompt="Выберите снимок с камеры или из галереи"
           hint="JPG, PNG или WebP — фотофиксация завершения поиска"
         />
-        {photos.length === 0 && (
-          <div className="row-between form-hint">
-            <span>Нет файла под рукой?</span>
-            <button type="button" className="link-btn" onClick={() => { setPhotos([DEMO_PHOTO]); showToast('Прикреплён демонстрационный снимок', 'info'); }}>
-              Вставить демо-снимок отряда ПСО
-            </button>
-          </div>
-        )}
       </div>
 
       <Field label="Обстоятельства обнаружения / рапорт" required>

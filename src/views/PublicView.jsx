@@ -2,7 +2,7 @@ import { useDeferredValue, useState } from 'react';
 import Icon from '../components/Icon.jsx';
 import EventCard from '../components/EventCard.jsx';
 import { EmptyState, SectionHeader } from '../components/Common.jsx';
-import { useStore } from '../store/StoreContext.jsx';
+import { useRun, useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
 import { REQUEST_STATUS, pluralize } from '../utils/format.js';
 
@@ -12,6 +12,7 @@ const matches = (e, q) => !q || [e.title, e.description, e.location, e.organizat
 export default function PublicView() {
   const store = useStore();
   const { openModal, showToast } = useUI();
+  const run = useRun();
   const [query, setQuery] = useState('');
   const user = store.getCurrentUser();
   const volunteer = user?.role === 'VOLUNTEER' ? store.getActiveVolunteer() : null;
@@ -25,14 +26,14 @@ export default function PublicView() {
   const filteredClosed = closed.filter((e) => matches(e, q));
   const totalHours = accepted.reduce((acc, e) => acc + (e.plannedHours || 0), 0);
 
-  const apply = (eventId) => {
+  const apply = async (eventId) => {
     if (!user) {
       showToast('Для подачи заявки войдите в систему или зарегистрируйтесь', 'info');
       openModal('login');
       return;
     }
-    const res = store.submitRequest(volunteer.id, eventId);
-    showToast(res.success ? 'Заявка на участие отправлена организатору!' : res.message, res.success ? 'success' : 'error');
+    if (!volunteer) { showToast('Подавать заявки могут волонтёры', 'info'); return; }
+    await run(store.submitRequest(volunteer.id, eventId), 'Заявка на участие отправлена организатору!');
   };
 
   const actionFor = (evt) => {
@@ -40,7 +41,7 @@ export default function PublicView() {
     if (user.role !== 'VOLUNTEER') return <span className="badge badge-accepted">Активно</span>;
     const req = myRequests.find((r) => r.eventId === evt.id);
     if (!req) return <button type="button" className="btn btn-primary btn-sm" onClick={() => apply(evt.id)}>Подать заявку</button>;
-    const labels = { ACCEPTED: 'Вы приняты!', CONFIRMED: `Часы: ${req.confirmedHours} ч`, CANCELLED: 'Отклонена', PENDING: 'Заявка на рассмотрении' };
+    const labels = { ACCEPTED: 'Вы приняты!', CONFIRMED: `Часы: ${req.confirmedHours} ч`, CANCELLED: 'Отклонена', OPEN: 'Заявка на рассмотрении' };
     return <span className={`badge ${REQUEST_STATUS[req.status].badge}`}>{labels[req.status]}</span>;
   };
 

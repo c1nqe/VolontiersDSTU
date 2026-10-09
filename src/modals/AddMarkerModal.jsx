@@ -5,7 +5,7 @@ import { Field } from '../components/Common.jsx';
 import PhotoUploader from '../components/PhotoUploader.jsx';
 import { useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
-import { MAX_MARKER_PHOTOS } from '../store/DataStore.js';
+import { MAX_MARKER_PHOTOS } from '../store/constants.js';
 
 /**
  * Создание метки на карте. Для поисково-спасательной операции можно
@@ -30,8 +30,8 @@ export default function AddMarkerModal({ onClose, lat, lng, onCreated }) {
   const bind = (k) => ({ value: f[k], onChange: (e) => setF((s) => ({ ...s, [k]: e.target.value })) });
   const isRescue = f.type === 'SEARCH_RESCUE';
 
-  const submit = () => {
-    const res = store.addMapMarker({
+  const submit = async () => {
+    const res = await store.addMapMarker({
       type: f.type,
       title: f.title.trim(),
       description: f.description.trim(),

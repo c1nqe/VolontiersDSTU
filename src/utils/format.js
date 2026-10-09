@@ -5,14 +5,14 @@ export const formatDate = (value) => {
 };
 
 export const EVENT_STATUS = {
-  CREATED: { badge: 'badge-created', label: 'Ожидает модерации' },
+  DRAFT: { badge: 'badge-created', label: 'Ожидает модерации' },
   ACCEPTED: { badge: 'badge-accepted', label: 'Набор открыт' },
   CLOSED: { badge: 'badge-closed', label: 'Событие завершено' },
   CANCELLED: { badge: 'badge-cancelled', label: 'Отменено' },
 };
 
 export const REQUEST_STATUS = {
-  PENDING: { badge: 'badge-pending', label: 'На рассмотрении' },
+  OPEN: { badge: 'badge-pending', label: 'На рассмотрении' },
   ACCEPTED: { badge: 'badge-accepted', label: 'Одобрена' },
   CONFIRMED: { badge: 'badge-confirmed', label: 'Часы подтверждены' },
   CANCELLED: { badge: 'badge-cancelled', label: 'Отклонена' },

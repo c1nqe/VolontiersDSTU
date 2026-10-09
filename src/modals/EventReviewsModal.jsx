@@ -5,7 +5,7 @@ import { RatingPicker, ReviewCard, ReviewSummary } from '../components/reviews/R
 import { SORTS } from '../components/reviews/reviewUtils.js';
 import { useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
-import { MAX_REVIEW_LENGTH } from '../store/DataStore.js';
+import { MAX_REVIEW_LENGTH } from '../store/constants.js';
 import { formatDate } from '../utils/format.js';
 
 /**
@@ -46,18 +46,19 @@ export default function EventReviewsModal({ onClose, eventId, compose = false })
     setEditing(true);
   };
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    const res = store.saveEventReview({ eventId, volonteerId: actingVolunteer.id, rating, text });
+    const res = await store.saveEventReview({ eventId, volonteerId: actingVolunteer.id, rating, text });
     if (!res.success) { showToast(res.message, 'error'); return; }
     showToast(res.updated ? 'Отзыв обновлён' : 'Спасибо! Отзыв опубликован.');
     setEditing(false);
     setFilter(null);
   };
 
-  const remove = (review) => {
+  const remove = async (review) => {
     if (!window.confirm('Удалить отзыв? Действие нельзя отменить.')) return;
-    store.deleteEventReview(review.id);
+    const res = await store.deleteEventReview(review.id);
+    if (!res.success) { showToast(res.message, 'error'); return; }
     showToast('Отзыв удалён', 'info');
     setEditing(false);
     setRating(0);

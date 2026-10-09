@@ -1,30 +1,30 @@
 import { useState } from 'react';
 import { ModalForm } from '../components/Modal.jsx';
 import { Field } from '../components/Common.jsx';
-import { useStore } from '../store/StoreContext.jsx';
+import { useRun, useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
 
 export default function CreateEventModal({ onClose }) {
   const store = useStore();
   const { showToast } = useUI();
+  const run = useRun();
   const [f, setF] = useState({ title: '', description: '', location: '', startDate: '', endDate: '', requiredVolunteers: 10, plannedHours: 6 });
   const bind = (k) => ({ value: f[k], onChange: (e) => setF((s) => ({ ...s, [k]: e.target.value })) });
 
-  const submit = () => {
+  const submit = async () => {
     const org = store.getActiveOrg();
     if (!org) return;
     if (f.endDate && f.startDate && f.endDate < f.startDate) {
       showToast('Дата окончания не может быть раньше даты начала', 'error');
       return;
     }
-    const evt = store.addEvent({
+    const res = await run(store.addEvent({
       ...f,
       requiredVolunteers: Number(f.requiredVolunteers),
       plannedHours: Number(f.plannedHours),
       organizationId: org.id,
-    });
-    showToast(`Событие «${evt.title}» отправлено администратору на модерацию.`);
-    onClose();
+    }), (r) => `Событие «${r.data.title}» отправлено администратору на модерацию.`);
+    if (res.success) onClose();
   };
 
   return (

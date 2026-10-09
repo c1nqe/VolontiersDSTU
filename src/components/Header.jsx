@@ -84,7 +84,7 @@ function useHeaderFit(containerRef, deps) {
   }, deps);
 }
 
-export default function Header({ view, onNavigate, onLogout, onReset, onPreload }) {
+export default function Header({ view, onNavigate, onLogout, onPreload }) {
   const store = useStore();
   const { openModal } = useUI();
   const containerRef = useRef(null);
@@ -155,9 +155,6 @@ export default function Header({ view, onNavigate, onLogout, onReset, onPreload 
               </button>
             </>
           )}
-          <button type="button" className="btn-icon" onClick={onReset} title="Сбросить к исходным демонстрационным данным" aria-label="Сбросить демо-данные">
-            <Icon name="refresh" />
-          </button>
         </div>
       </div>
     </header>

@@ -32,27 +32,32 @@ export default function ContextBanner({ view }) {
     controls = <span className="context-note"><Icon name="shield" /> Главный координатор ВЦ ДГТУ</span>;
   } else if (view === 'ORGANIZER') {
     const current = store.getActiveOrg();
+    const user = store.getCurrentUser();
+    const orgOptions = user?.role === 'ADMIN' ? store.getOrganizations() : store.getOrganizations().filter((o) => o.id === current?.id);
     controls = (
       <label className="context-selector">
         <span>Организация:</span>
         <select
           value={current?.id || ''}
+          disabled={user?.role !== 'ADMIN'}
           onChange={(e) => {
             store.setActiveOrg(e.target.value);
             showToast(`Выбрана организация: ${store.getActiveOrg().name}`);
           }}
         >
-          {store.getOrganizations().map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          {orgOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
       </label>
     );
   } else if (view === 'VOLUNTEER') {
     const current = store.getActiveVolunteer();
+    const isAdmin = store.getCurrentUser()?.role === 'ADMIN';
     controls = (
       <label className="context-selector">
         <span>Профиль:</span>
         <select
           value={current?.id || ''}
+          disabled={!isAdmin}
           onChange={(e) => {
             store.setActiveVolunteer(e.target.value);
             showToast(`Выбран волонтёр: ${store.getActiveVolunteer().fullName}`);

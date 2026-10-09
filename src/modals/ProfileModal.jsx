@@ -1,7 +1,6 @@
 import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
 import { useStore } from '../store/StoreContext.jsx';
-import { useUI } from '../components/UIContext.jsx';
 import { formatDate } from '../utils/format.js';
 
 const ROLE_BADGE = {
@@ -12,14 +11,11 @@ const ROLE_BADGE = {
 
 export default function ProfileModal({ onClose, onLogout }) {
   const store = useStore();
-  const { showToast } = useUI();
   const user = store.getCurrentUser();
   if (!user) return null;
 
   const badge = ROLE_BADGE[user.role] || ROLE_BADGE.VOLUNTEER;
-  const token = store.getJWTToken() || '';
-  const parts = token.split('.');
-  const decoded = store.getDecodedJWT();
+  const expires = store.getSessionExpiry();
 
   let details;
   if (user.role === 'VOLUNTEER') {
@@ -31,7 +27,7 @@ export default function ProfileModal({ onClose, onLogout }) {
           <div><strong>Студенческий билет:</strong> {vol?.studentId}</div>
           <div><strong>Факультет:</strong> {vol?.faculty}</div>
           <div><strong>Подтверждённых часов:</strong> <span className="tone-accent strong">{vol?.totalConfirmedHours} ч</span></div>
-          <div><strong>Отзывов оставлено:</strong> {(store.data.eventReviews || []).filter((r) => r.volonteerId === vol?.id).length}</div>
+          <div><strong>Отзывов оставлено:</strong> {store.getAllReviews().filter((r) => r.volonteerId === vol?.id).length}</div>
         </div>
       </div>
     );
@@ -88,27 +84,14 @@ export default function ProfileModal({ onClose, onLogout }) {
 
         {details}
 
-        <div className="jwt-inspector">
-          <div className="jwt-header-bar">
-            <span className="jwt-title"><Icon name="lock" /> JWT-токен сессии (RFC 7519)</span>
-            <button
-              type="button"
-              className="jwt-copy"
-              onClick={() => navigator.clipboard?.writeText(token).then(() => showToast('JWT-токен скопирован')).catch(() => showToast('Не удалось скопировать токен', 'error'))}
-            >
-              <Icon name="copy" /> Скопировать
-            </button>
+        <div className="info-panel">
+          <div className="info-panel-title"><Icon name="lock" /> Безопасность сессии</div>
+          <div className="info-grid">
+            <div><strong>Действует до:</strong> {expires ? new Date(expires).toLocaleString('ru-RU') : '—'}</div>
+            <div><strong>Хранение токена:</strong> HttpOnly-cookie (недоступна скриптам страницы)</div>
+            <div><strong>Пароль:</strong> на сервере хранится только хэш Argon2id</div>
+            <div><strong>Выход:</strong> завершает сессию на всех устройствах</div>
           </div>
-          <p className="jwt-legend">
-            Структура: <span className="jwt-part-header">Header</span>.<span className="jwt-part-payload">Payload</span>.<span className="jwt-part-signature">Signature</span>
-          </p>
-          <div className="jwt-token-raw">
-            {parts.length === 3 ? (
-              <><span className="jwt-part-header">{parts[0]}</span>.<span className="jwt-part-payload">{parts[1]}</span>.<span className="jwt-part-signature">{parts[2]}</span></>
-            ) : token}
-          </div>
-          <p className="jwt-legend">Декодированная полезная нагрузка:</p>
-          <pre className="jwt-decoded-view">{decoded ? JSON.stringify({ header: decoded.header, payload: decoded.payload }, null, 2) : 'Токен отсутствует'}</pre>
         </div>
       </div>
     </Modal>

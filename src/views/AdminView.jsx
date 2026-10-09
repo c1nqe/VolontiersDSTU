@@ -3,7 +3,7 @@ import Icon from '../components/Icon.jsx';
 import EventCard from '../components/EventCard.jsx';
 import { EmptyState, Field, SectionHeader, StatCard, StatsGrid, Tabs } from '../components/Common.jsx';
 import { ReviewCard } from '../components/reviews/ReviewParts.jsx';
-import { useStore } from '../store/StoreContext.jsx';
+import { useRun, useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
 import { pluralize } from '../utils/format.js';
 
@@ -18,7 +18,8 @@ function useForm(initial) {
 
 export default function AdminView() {
   const store = useStore();
-  const { showToast, openModal, openLightbox } = useUI();
+  const { openModal, openLightbox } = useUI();
+  const run = useRun();
   const [tab, setTab] = useState('moderation');
   const orgForm = useForm(EMPTY_ORG);
   const volForm = useForm(EMPTY_VOL);
@@ -26,11 +27,10 @@ export default function AdminView() {
   const orgs = store.getOrganizations();
   const vols = store.getVolunteers();
   const events = store.getEvents();
-  const pendingEvents = events.filter((e) => e.status === 'CREATED');
+  const pendingEvents = events.filter((e) => e.status === 'DRAFT');
   const pendingMarkers = store.getPendingMarkerApprovals();
   const allReviews = store.getAllReviews();
   const eventTitle = (id) => events.find((e) => e.id === id)?.title || 'Мероприятие удалено';
-  const admin = store.getCurrentUser();
 
   const tabs = [
     { id: 'moderation', label: 'Модерация событий', icon: 'shield', count: pendingEvents.length },
@@ -41,16 +41,12 @@ export default function AdminView() {
     { id: 'registry', label: 'Общий реестр', icon: 'fileText' },
   ];
 
-  const approveMarker = (m) => {
-    store.approveMarkerClose(m.id, admin?.id || 'adm-1', admin ? `${admin.firstName} ${admin.lastName}` : 'Администратор сервиса');
-    showToast('Завершение поисковой операции одобрено, статус метки обновлён.');
-  };
+  const approveMarker = (m) => run(store.approveMarkerClose(m.id), 'Завершение поисковой операции одобрено, статус метки обновлён.');
 
-  const rejectMarker = (m) => {
+  const rejectMarker = async (m) => {
     const reason = window.prompt('Укажите причину отклонения заявки на закрытие ПСО:', 'Недостаточно подтверждающих материалов / требуется повторный выезд');
     if (reason === null) return;
-    store.rejectMarkerClose(m.id, reason);
-    showToast('Заявка на закрытие отклонена. Метка снова в активном поиске.', 'error');
+    await run(store.rejectMarkerClose(m.id, reason), 'Заявка на закрытие отклонена. Метка снова в активном поиске.', 'error');
   };
 
   return (
@@ -58,7 +54,7 @@ export default function AdminView() {
       <StatsGrid>
         <StatCard label="Организаций" value={orgs.length} sub="Зарегистрировано в системе" />
         <StatCard label="Волонтёров" value={vols.length} sub="Студентов ДГТУ в базе" />
-        <StatCard label="Ожидают модерации" value={pendingEvents.length} tone="warning" sub="События со статусом CREATED" />
+        <StatCard label="Ожидают модерации" value={pendingEvents.length} tone="warning" sub="События со статусом DRAFT" />
         <StatCard label="Всего событий" value={events.length} sub="Одобрено, закрыто или отменено" />
       </StatsGrid>
 
@@ -80,10 +76,10 @@ export default function AdminView() {
                   meta="admin"
                   actions={(
                     <>
-                      <button type="button" className="btn btn-danger btn-sm" onClick={() => { store.updateEventStatus(evt.id, 'CANCELLED'); showToast('Событие отклонено (CANCELLED)', 'error'); }}>
+                      <button type="button" className="btn btn-danger btn-sm" onClick={() => run(store.moderateEvent(evt.id, 'CANCELLED'), 'Событие отклонено (CANCELLED)', 'error')}>
                         <Icon name="cross" /> Отклонить
                       </button>
-                      <button type="button" className="btn btn-accent btn-sm" onClick={() => { store.updateEventStatus(evt.id, 'ACCEPTED'); showToast('Событие согласовано и доступно волонтёрам.'); }}>
+                      <button type="button" className="btn btn-accent btn-sm" onClick={() => run(store.moderateEvent(evt.id, 'ACCEPTED'), 'Событие согласовано и доступно волонтёрам.')}>
                         <Icon name="check" /> Согласовать
                       </button>
                     </>
@@ -170,10 +166,7 @@ export default function AdminView() {
                       type="button"
                       className="link-btn danger"
                       onClick={() => {
-                        if (window.confirm('Удалить этот отзыв? Действие нельзя отменить.')) {
-                          store.deleteEventReview(r.id);
-                          showToast('Отзыв удалён', 'info');
-                        }
+                        if (window.confirm('Удалить этот отзыв? Действие нельзя отменить.')) run(store.deleteEventReview(r.id), 'Отзыв удалён', 'info');
                       }}
                     >
                       <Icon name="trash" /> Удалить
@@ -189,11 +182,10 @@ export default function AdminView() {
       {tab === 'reg-org' && (
         <form
           className="form-card"
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            const org = store.addOrganization(orgForm.values);
-            showToast(`Организация «${org.name}» зарегистрирована!`);
-            orgForm.reset();
+            const res = await run(store.addOrganization(orgForm.values), (r) => `Организация «${r.data.name}» зарегистрирована!`);
+            if (res.success) orgForm.reset();
           }}
         >
           <h3 className="form-card-title">Регистрация новой организации</h3>
@@ -218,11 +210,10 @@ export default function AdminView() {
       {tab === 'reg-vol' && (
         <form
           className="form-card"
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            const vol = store.addVolunteer(volForm.values);
-            showToast(`Волонтёр ${vol.fullName} зарегистрирован!`);
-            volForm.reset();
+            const res = await run(store.addVolunteer(volForm.values), (r) => `Волонтёр ${r.data.fullName} зарегистрирован!`);
+            if (res.success) volForm.reset();
           }}
         >
           <h3 className="form-card-title">Регистрация нового волонтёра</h3>

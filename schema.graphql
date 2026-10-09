@@ -1,313 +1,336 @@
-"""
-Схема GraphQL для сервиса «Волонтеры» (DataSpace Community Edition)
-Хакатон ВЕСНА '25 | ДГТУ
-"""
-
-enum EventStatus {
-  CREATED     # Создано организатором, ожидает модерации администратора
-  ACCEPTED    # Согласовано администратором, доступно для волонтеров
-  CANCELLED   # Отклонено администратором или отменено организатором
-  CLOSED      # Завершено организатором после проведения
-}
-
-enum RequestStatus {
-  PENDING     # Заявка подана волонтером, ожидает решения организатора
-  ACCEPTED    # Заявка согласована организатором
-  CANCELLED   # Заявка отклонена организатором или отменена волонтером
-  CONFIRMED   # Факт работы подтвержден организатором с начислением часов
-}
-
-enum UserRole {
-  ADMIN       # Администратор сервиса
-  ORGANIZER   # Организатор событий
-  VOLUNTEER   # Волонтёр (студент)
-}
-
-type User {
-  id: ID!
-  firstName: String!
-  lastName: String!
-  email: String!
-  role: UserRole!
-  createdAt: String!
-}
-
 type AuthPayload {
-  token: String!
-  user: User!
-}
-
-type Organization {
-  id: ID!
-  name: String!
-  inn: String
-  contactPerson: String!
-  email: String!
-  phone: String!
-  description: String
-  createdAt: String!
-  events: [Event!]
-}
-
-type Volonteer {
-  id: ID!
-  fullName: String!
-  email: String!
-  phone: String!
-  birthDate: String
-  studentId: String
-  faculty: String
-  totalConfirmedHours: Float!
-  createdAt: String!
-  requests: [VolonteerEventRequest!]
-}
-
-type Event {
-  id: ID!
-  title: String!
-  description: String!
-  location: String!
-  startDate: String!
-  endDate: String!
-  requiredVolunteers: Int!
-  plannedHours: Float!
-  status: EventStatus!
-  organizationId: ID!
-  organization: Organization!
-  requests: [VolonteerEventRequest!]
-  createdAt: String!
-  reviews: [EventReview!]
-  ratingAvg: Float    # Средняя оценка по отзывам
-  reviewsCount: Int!
-}
-
-type VolonteerEventRequest {
-  id: ID!
-  volonteerId: ID!
-  volonteer: Volonteer!
-  eventId: ID!
-  event: Event!
-  status: RequestStatus!
-  requestedHours: Float!
-  confirmedHours: Float
-  rejectionReason: String
-  createdAt: String!
-  updatedAt: String!
-}
-
-# Отзыв волонтёра о проведённом мероприятии (1 отзыв на участника)
-type EventReview {
-  id: ID!
-  eventId: ID!
-  event: Event!
-  volonteerId: ID!
-  volonteer: Volonteer!
-  authorName: String!
-  rating: Int! # 1..5
-  text: String!
-  createdAt: String!
-  updatedAt: String
-}
-
-enum MapMarkerType {
-  REGULAR        # Волонтёрская помощь
-  SEARCH_RESCUE  # Поисково-спасательная операция (ПСО)
-}
-
-enum MapMarkerStatus {
-  ACTIVE
-  PENDING_APPROVAL # Отчёт о закрытии ПСО на согласовании
-  FOUND
-  CLOSED
-}
-
-enum Urgency {
-  HIGH
-  MEDIUM
-  LOW
+	"""
+	Токен возвращается только если клиент попросил его заголовком `X-Token-Response: 1`
+	(не-браузерные клиенты). Браузер получает его в HttpOnly-cookie и до JS он не доходит.
+	"""
+	token: String
+	user: User!
+	expiresAt: String!
 }
 
 type ClosureProof {
-  photo: String!
-  note: String!
-  targetStatus: MapMarkerStatus!
-  submittedBy: ID!
-  submittedByName: String!
-  submittedAt: String!
-  approvedAt: String
-  approvedBy: String
-  rejectedAt: String
-  rejectReason: String
+	"""
+	Ссылка на фото отчёта (отдаётся только авторизованным) либо пустая строка.
+	"""
+	photo: String!
+	note: String!
+	targetStatus: MapMarkerStatus!
+	submittedBy: ID
+	submittedByName: String!
+	submittedAt: String!
+	approvedAt: String
+	approvedBy: String
+	rejectedAt: String
+	rejectReason: String
+}
+
+type Event {
+	id: ID!
+	title: String!
+	description: String!
+	location: String!
+	"""
+	Дата начала по Москве, ГГГГ-ММ-ДД (совместимость с фронтом).
+	"""
+	startDate: String!
+	endDate: String!
+	"""
+	Момент начала/окончания — Event.startDateTime / endDateTime из модели (RFC 3339, UTC).
+	"""
+	startDateTime: String!
+	endDateTime: String!
+	requiredVolunteers: Int!
+	plannedHours: Float!
+	status: EventStatus!
+	organizationId: ID!
+	organizationName: String!
+	requestsCount: Int!
+	approvedVolunteersCount: Int!
+	ratingAvg: Float
+	reviewsCount: Int!
+	createdAt: String!
+	organization: Organization!
+	requests: [VolonteerEventRequest!]!
+	reviews: [EventReview!]!
+}
+
+type EventReview {
+	id: ID!
+	eventId: ID!
+	volonteerId: ID!
+	authorName: String!
+	rating: Int!
+	text: String!
+	createdAt: String!
+	updatedAt: String
+	event: Event!
+	volonteer: Volonteer!
+}
+
+enum EventStatus {
+	DRAFT
+	ACCEPTED
+	CANCELLED
+	CLOSED
 }
 
 type MapMarker {
-  id: ID!
-  type: MapMarkerType!
-  status: MapMarkerStatus!
-  title: String!
-  description: String!
-  lat: Float!
-  lng: Float!
-  urgency: Urgency!
-  contactPhone: String
-  lastSeenDate: String
-  lastSeenLocation: String
-  photos: [String!]! # Фото, прикреплённые при создании метки ПСО (до 5, URL или data URL)
-  closureProof: ClosureProof
-  createdBy: ID!
-  createdByName: String!
-  createdAt: String!
+	id: ID!
+	type: MapMarkerType!
+	status: MapMarkerStatus!
+	title: String!
+	description: String!
+	lat: Float!
+	lng: Float!
+	urgency: Urgency!
+	contactPhone: String
+	lastSeenDate: String
+	lastSeenLocation: String
+	"""
+	Ссылки вида /media/photos/{id}; сами файлы лежат в PostgreSQL.
+	"""
+	photos: [String!]!
+	closureProof: ClosureProof
+	createdBy: ID
+	createdByName: String!
+	createdAt: String!
 }
 
 input MapMarkerInput {
-  type: MapMarkerType!
-  title: String!
-  description: String!
-  lat: Float!
-  lng: Float!
-  urgency: Urgency!
-  contactPhone: String
-  lastSeenDate: String
-  lastSeenLocation: String
-  photos: [String!]
+	type: MapMarkerType!
+	title: String!
+	description: String!
+	lat: Float!
+	lng: Float!
+	urgency: Urgency!
+	contactPhone: String
+	lastSeenDate: String
+	lastSeenLocation: String
+	"""
+	До 5 изображений в виде data URL (JPEG/PNG/WebP). Сервер перекодирует их и удалит EXIF.
+	"""
+	photos: [String!]
+}
+
+enum MapMarkerStatus {
+	ACTIVE
+	PENDING_APPROVAL
+	FOUND
+	CLOSED
+}
+
+enum MapMarkerType {
+	REGULAR
+	SEARCH_RESCUE
+}
+
+type Mutation {
+	register(firstName: String!, lastName: String!, email: String!, password: String!, role: UserRole!): AuthPayload!
+	login(email: String!, password: String!): AuthPayload!
+	"""
+	Завершает все сессии пользователя (token_version++), очищает cookie.
+	"""
+	logout: Boolean!
+	changePassword(oldPassword: String!, newPassword: String!): Boolean!
+	registerOrganization(name: String!, contactPerson: String!, email: String!, phone: String!, inn: String, description: String): Organization!
+	registerVolonteer(fullName: String!, email: String!, phone: String!, studentId: String, faculty: String, birthDate: String): Volonteer!
+	"""
+	DRAFT → ACCEPTED | CANCELLED
+	"""
+	moderateEvent(eventId: ID!, status: EventStatus!): Event!
+	createEvent(title: String!, description: String!, location: String!, startDate: String!, endDate: String!, requiredVolunteers: Int!, plannedHours: Float!, organizationId: ID!): Event!
+	"""
+	OPEN → ACCEPTED | CANCELLED
+	"""
+	moderateRequest(requestId: ID!, status: RequestStatus!, rejectionReason: String): VolonteerEventRequest!
+	"""
+	ACCEPTED → CONFIRMED (часы проставляются атомарно)
+	"""
+	confirmVolunteerWork(requestId: ID!, confirmedHours: Float!): VolonteerEventRequest!
+	"""
+	ACCEPTED → CLOSED
+	"""
+	closeEvent(eventId: ID!): Event!
+	submitEventRequest(volonteerId: ID!, eventId: ID!, description: String): VolonteerEventRequest!
+	"""
+	OPEN → CANCELLED
+	"""
+	cancelEventRequest(requestId: ID!): VolonteerEventRequest!
+	submitEventReview(eventId: ID!, volonteerId: ID!, rating: Int!, text: String!): EventReview!
+	deleteEventReview(reviewId: ID!): Boolean!
+	createMapMarker(input: MapMarkerInput!): MapMarker!
+	"""
+	ACTIVE → PENDING_APPROVAL: отчёт с фото о завершении ПСО.
+	"""
+	requestMarkerClose(markerId: ID!, photo: String, note: String!, targetStatus: MapMarkerStatus!): MapMarker!
+	approveMarkerClose(markerId: ID!): MapMarker!
+	rejectMarkerClose(markerId: ID!, reason: String): MapMarker!
+	"""
+	Закрытие обычной метки (автор или администратор).
+	"""
+	closeMapMarker(markerId: ID!): MapMarker!
+	deleteMapMarker(markerId: ID!): Boolean!
+}
+
+type Organization {
+	id: ID!
+	name: String!
+	description: String
+	"""
+	Контакты видны администратору и организатору этой организации.
+	"""
+	inn: String
+	contactPerson: String
+	email: String
+	phone: String
+	createdAt: String!
+	events: [Event!]!
+}
+
+type Query {
+	"""
+	Текущий пользователь (null для гостя).
+	"""
+	me: User
+	"""
+	Сессия: пользователь и срок действия.
+	"""
+	session: Session
+	"""
+	Список учётных записей — только администратор.
+	"""
+	users: [User!]!
+	organizations: [Organization!]!
+	organization(id: ID!): Organization
+	volonteers: [Volonteer!]!
+	volonteer(id: ID!): Volonteer
+	events(status: EventStatus): [Event!]!
+	event(id: ID!): Event
+	"""
+	События, на которые можно подать заявку (ACCEPTED).
+	"""
+	availableEvents: [Event!]!
+	requests(volonteerId: ID, eventId: ID, status: RequestStatus): [VolonteerEventRequest!]!
+	request(id: ID!): VolonteerEventRequest
+	"""
+	Выписка о подтверждённых часах (заявки CONFIRMED на событиях CLOSED) за период.
+	"""
+	volonteerStatement(volonteerId: ID!, startDate: String!, endDate: String!): StatementReport!
+	"""
+	Отзывы: по событию и/или по волонтёру. Публично (автор — только ФИО).
+	"""
+	reviews(eventId: ID, volonteerId: ID): [EventReview!]!
+	eventReviews(eventId: ID!): [EventReview!]!
+	mapMarkers(type: MapMarkerType): [MapMarker!]!
+}
+
+enum RequestStatus {
+	OPEN
+	ACCEPTED
+	CANCELLED
+	CONFIRMED
+}
+
+"""
+Состояние сессии для клиента.
+"""
+type Session {
+	user: User!
+	expiresAt: String!
 }
 
 type StatementReport {
-  volonteer: Volonteer!
-  startDate: String!
-  endDate: String!
-  totalHours: Float!
-  closedEventsCount: Int!
-  items: [StatementReportItem!]!
+	volunteer: Volonteer!
+	volonteer: Volonteer!
+	startDate: String!
+	endDate: String!
+	generatedAt: String!
+	totalHours: Float!
+	closedEventsCount: Int!
+	items: [StatementReportItem!]!
 }
 
 type StatementReportItem {
-  eventName: String!
-  organizationName: String!
-  eventDate: String!
-  confirmedHours: Float!
+	eventName: String!
+	organizationName: String!
+	eventDate: String!
+	location: String!
+	confirmedHours: Float!
 }
 
-# Queries
-type Query {
-  organizations: [Organization!]!
-  organization(id: ID!): Organization
-
-  volonteers: [Volonteer!]!
-  volonteer(id: ID!): Volonteer
-
-  events(status: EventStatus): [Event!]!
-  event(id: ID!): Event
-  availableEvents: [Event!]! # Event = ACCEPTED
-
-  requests(volonteerId: ID, eventId: ID, status: RequestStatus): [VolonteerEventRequest!]!
-  request(id: ID!): VolonteerEventRequest
-
-  # Авторизация и профиль
-  me: User
-  users: [User!]!
-
-  # Выписка об отработанных часах на закрытых событиях (CONFIRMED) за период
-  volonteerStatement(volonteerId: ID!, startDate: String!, endDate: String!): StatementReport!
-
-  # Отзывы и карта
-  eventReviews(eventId: ID!): [EventReview!]!
-  mapMarkers(type: MapMarkerType): [MapMarker!]!
+enum Urgency {
+	HIGH
+	MEDIUM
+	LOW
 }
 
-# Mutations
-type Mutation {
-  # Аутентификация (JWT)
-  register(
-    firstName: String!
-    lastName: String!
-    email: String!
-    password: String!
-    role: UserRole!
-  ): AuthPayload!
+type User {
+	id: ID!
+	firstName: String!
+	lastName: String!
+	email: String!
+	role: UserRole!
+	createdAt: String!
+	organizationId: ID
+	volonteerId: ID
+}
 
-  login(
-    email: String!
-    password: String!
-  ): AuthPayload!
+enum UserRole {
+	ADMIN
+	ORGANIZER
+	VOLUNTEER
+}
 
-  # Администратор
-  registerOrganization(
-    name: String!
-    contactPerson: String!
-    email: String!
-    phone: String!
-    inn: String
-    description: String
-  ): Organization!
+type Volonteer {
+	id: ID!
+	fullName: String!
+	firstName: String!
+	lastName: String!
+	"""
+	Контакты и дата рождения — только сам волонтёр и администратор;
+	email/телефон — ещё и организатор, у которого есть заявка этого волонтёра.
+	"""
+	email: String
+	phone: String
+	birthDate: String
+	studentId: String
+	faculty: String
+	totalConfirmedHours: Float!
+	createdAt: String!
+	requests: [VolonteerEventRequest!]!
+}
 
-  registerVolonteer(
-    fullName: String!
-    email: String!
-    phone: String!
-    studentId: String
-    faculty: String
-    birthDate: String
-  ): Volonteer!
+type VolonteerEventRequest {
+	id: ID!
+	volonteerId: ID!
+	volonteerName: String!
+	volonteerFaculty: String
+	volonteerStudentId: String
+	eventId: ID!
+	eventTitle: String!
+	eventDate: String!
+	eventStatus: EventStatus!
+	organizationName: String!
+	description: String
+	status: RequestStatus!
+	requestedHours: Float!
+	confirmedHours: Float
+	rejectionReason: String
+	createdAt: String!
+	updatedAt: String!
+	volonteer: Volonteer!
+	event: Event!
+}
 
-  moderateEvent(
-    eventId: ID!
-    status: EventStatus! # ACCEPTED | CANCELLED
-  ): Event!
-
-  # Организатор
-  createEvent(
-    title: String!
-    description: String!
-    location: String!
-    startDate: String!
-    endDate: String!
-    requiredVolunteers: Int!
-    plannedHours: Float!
-    organizationId: ID!
-  ): Event!
-
-  moderateRequest(
-    requestId: ID!
-    status: RequestStatus! # ACCEPTED | CANCELLED
-    rejectionReason: String
-  ): VolonteerEventRequest!
-
-  confirmVolunteerWork(
-    requestId: ID!
-    confirmedHours: Float!
-  ): VolonteerEventRequest!
-
-  closeEvent(
-    eventId: ID!
-  ): Event!
-
-  # Волонтёр
-  submitEventRequest(
-    volonteerId: ID!
-    eventId: ID!
-  ): VolonteerEventRequest!
-
-  cancelEventRequest(
-    requestId: ID!
-  ): VolonteerEventRequest!
-
-  # Отзыв участника (создаёт или обновляет собственный отзыв).
-  # Доступно, если заявка CONFIRMED или ACCEPTED на закрытом событии.
-  submitEventReview(
-    eventId: ID!
-    volonteerId: ID!
-    rating: Int!
-    text: String!
-  ): EventReview!
-
-  # Администратор (модерация) или автор отзыва
-  deleteEventReview(
-    reviewId: ID!
-  ): Boolean!
-
-  # Карта: метка с фотографиями (фото принимаются только для SEARCH_RESCUE)
-  createMapMarker(
-    input: MapMarkerInput!
-  ): MapMarker!
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+schema {
+	query: Query
+	mutation: Mutation
 }

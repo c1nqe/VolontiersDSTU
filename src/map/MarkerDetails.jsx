@@ -29,9 +29,10 @@ export default function MarkerDetails({ marker, onAfterAction }) {
     onAfterAction?.();
   };
 
-  const closeRegular = () => {
+  const closeRegular = async () => {
     if (!requireAuth()) return;
-    store.updateMarkerStatus(marker.id, 'CLOSED');
+    const res = await store.closeMarker(marker.id);
+    if (!res.success) { showToast(res.message, 'error'); return; }
     showToast('Метка закрыта.');
     onAfterAction?.();
   };

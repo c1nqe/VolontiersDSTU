@@ -5,6 +5,10 @@ import { Field } from '../components/Common.jsx';
 import { useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
 
+// Демо-профили показываются только в режиме разработки (npm run dev) и в сборках с VITE_DEMO_ACCOUNTS=true.
+// Эти учётные записи создаёт `volontiers-server seed`; в production сид запрещён.
+const SHOW_DEMO = Boolean(import.meta.env?.DEV) || import.meta.env?.VITE_DEMO_ACCOUNTS === 'true';
+
 const DEMO_ACCOUNTS = [
   { email: 'admin@donstu.ru', pass: 'admin123', label: 'Администратор', icon: 'shield' },
   { email: 'organizer@donstu.ru', pass: 'org123', label: 'Организатор', icon: 'building' },
@@ -17,8 +21,8 @@ export function LoginModal({ onClose, onAuthenticated }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  const submit = () => {
-    const res = store.login(email, password);
+  const submit = async () => {
+    const res = await store.login(email, password);
     if (!res.success) { showToast(res.message, 'error'); return; }
     showToast(`Добро пожаловать, ${res.user.firstName}!`);
     onClose();
@@ -44,6 +48,7 @@ export function LoginModal({ onClose, onAuthenticated }) {
       <Field label="Пароль" required>
         <input type="password" className="form-input" required autoComplete="current-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
       </Field>
+      {SHOW_DEMO && (
       <div className="demo-login-box">
         <p>Демо-профили для проверки:</p>
         <div className="demo-chips">
@@ -54,6 +59,7 @@ export function LoginModal({ onClose, onAuthenticated }) {
           ))}
         </div>
       </div>
+      )}
     </ModalForm>
   );
 }
@@ -61,7 +67,6 @@ export function LoginModal({ onClose, onAuthenticated }) {
 const ROLES = [
   { role: 'VOLUNTEER', title: 'Волонтёр', subtitle: 'Студент ДГТУ', icon: 'user' },
   { role: 'ORGANIZER', title: 'Организатор', subtitle: 'Создатель событий', icon: 'building' },
-  { role: 'ADMIN', title: 'Администратор', subtitle: 'Координатор', icon: 'shield' },
 ];
 
 export function RegisterModal({ onClose, onAuthenticated }) {
@@ -70,8 +75,8 @@ export function RegisterModal({ onClose, onAuthenticated }) {
   const [form, setForm] = useState({ role: 'VOLUNTEER', firstName: '', lastName: '', email: '', password: '' });
   const bind = (k) => ({ value: form[k], onChange: (e) => setForm((f) => ({ ...f, [k]: e.target.value })) });
 
-  const submit = () => {
-    const res = store.register(form);
+  const submit = async () => {
+    const res = await store.register(form);
     if (!res.success) { showToast(res.message, 'error'); return; }
     showToast('Аккаунт создан, вы вошли в систему.');
     onClose();
@@ -115,8 +120,8 @@ export function RegisterModal({ onClose, onAuthenticated }) {
       <Field label="Электронная почта" required>
         <input type="email" className="form-input" required placeholder="ivan.petrov@donstu.ru" autoComplete="email" {...bind('email')} />
       </Field>
-      <Field label="Пароль" required hint="Минимум 4 символа">
-        <input type="password" className="form-input" minLength={4} required autoComplete="new-password" {...bind('password')} />
+      <Field label="Пароль" required hint="Не менее 8 символов: буквы и хотя бы одна цифра или спецсимвол">
+        <input type="password" className="form-input" minLength={8} maxLength={128} required autoComplete="new-password" {...bind('password')} />
       </Field>
     </ModalForm>
   );

@@ -1,14 +1,14 @@
-import { useDeferredValue, useState } from 'react';
+import { useDeferredValue, useEffect, useState } from 'react';
 import Icon from '../components/Icon.jsx';
 import EventCard from '../components/EventCard.jsx';
 import { EmptyState, StatCard, StatsGrid, Tabs } from '../components/Common.jsx';
 import { RatingPill } from '../components/reviews/ReviewParts.jsx';
-import { useStore } from '../store/StoreContext.jsx';
+import { useRun, useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
 import { REQUEST_STATUS, formatDate } from '../utils/format.js';
 
 const MY_REQUEST_LABEL = {
-  PENDING: 'На рассмотрении',
+  OPEN: 'На рассмотрении',
   ACCEPTED: 'Одобрена (готовимся)',
   CANCELLED: 'Отклонена организатором',
 };
@@ -16,6 +16,7 @@ const MY_REQUEST_LABEL = {
 export default function VolunteerView() {
   const store = useStore();
   const { showToast, openModal } = useUI();
+  const run = useRun();
   const [tab, setTab] = useState('available');
   const [query, setQuery] = useState('');
   const [period, setPeriod] = useState({ start: '2026-09-01', end: '2026-10-31' });
@@ -23,6 +24,17 @@ export default function VolunteerView() {
 
   const deferredQuery = useDeferredValue(query);
   const vol = store.getActiveVolunteer();
+  const [report, setReport] = useState(null);
+  const volId = vol?.id;
+
+  // Выписку формирует сервер: в неё попадают только CONFIRMED-заявки на CLOSED-событиях
+  useEffect(() => {
+    if (!volId) return undefined;
+    let alive = true;
+    store.fetchStatement(volId, statementPeriod.start, statementPeriod.end).then((r) => { if (alive) setReport(r.success ? r.report : null); });
+    return () => { alive = false; };
+  }, [store, volId, statementPeriod.start, statementPeriod.end]);
+
   if (!vol) return null;
 
   const events = store.getEvents();
@@ -35,12 +47,7 @@ export default function VolunteerView() {
   const reviewable = myRequests.filter((r) => store.canReviewEvent(vol.id, r.eventId).allowed);
   const awaitingReview = reviewable.filter((r) => !myReviews.some((rv) => rv.eventId === r.eventId));
 
-  const report = store.getVolunteerStatement(vol.id, statementPeriod.start, statementPeriod.end);
-
-  const apply = (eventId) => {
-    const res = store.submitRequest(vol.id, eventId);
-    showToast(res.success ? 'Заявка на участие отправлена организатору!' : res.message, res.success ? 'success' : 'error');
-  };
+  const apply = (eventId) => run(store.submitRequest(vol.id, eventId), 'Заявка на участие отправлена организатору!');
 
   const tabs = [
     { id: 'available', label: 'Доступные события', icon: 'star' },
@@ -74,7 +81,7 @@ export default function VolunteerView() {
             <div className="cards-grid">
               {available.map((evt) => {
                 const req = myRequests.find((r) => r.eventId === evt.id);
-                const labels = { PENDING: 'Заявка на рассмотрении', ACCEPTED: 'Вы приняты', CONFIRMED: `Часы подтверждены (${req?.confirmedHours} ч)`, CANCELLED: 'Заявка отклонена' };
+                const labels = { OPEN: 'Заявка на рассмотрении', ACCEPTED: 'Вы приняты', CONFIRMED: `Часы подтверждены (${req?.confirmedHours} ч)`, CANCELLED: 'Заявка отклонена' };
                 return (
                   <EventCard
                     key={evt.id}

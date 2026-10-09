@@ -34,3 +34,6 @@ coverage/
 
 # Misc
 *.pdf
+
+# Rust
+backend/target/

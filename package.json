@@ -9,7 +9,7 @@
     "start": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run && node tests/legacy-suite.cjs"
+    "test": "vitest run"
   },
   "keywords": ["volunteers", "dstu", "hackathon", "graphql", "dataspace-ce", "jwt", "react"],
   "author": "c1nqe",

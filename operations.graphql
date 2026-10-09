@@ -1,352 +1,101 @@
 # ==============================================================================
-# GraphQL Операции: VolontiersDSTU
-# Соответствует схеме schema.graphql (DataSpace Community Edition)
+# GraphQL-операции VolontiersDSTU — именно их выполняет фронтенд (src/store/ApiStore.js).
+# Контракт — schema.graphql (генерируется из кода сервера: `cargo run -- schema`).
+# Эндпоинт: POST /graphql. Сессия — HttpOnly-cookie `vt_session` (заголовок Authorization: Bearer
+# нужен только не-браузерным клиентам; токен им возвращается при заголовке `X-Token-Response: 1`).
 # ==============================================================================
 
-# ------------------------------------------------------------------------------
-# 1. АВТОРИЗАЦИЯ И ПОЛЬЗОВАТЕЛИ
-# ------------------------------------------------------------------------------
-
-query GetCurrentUser {
-  me {
-    id
-    firstName
-    lastName
-    email
-    role
-    createdAt
+# ---------- Загрузка данных (один запрос на весь кэш фронтенда) ----------------
+# Что именно придёт, зависит от роли: гость не получит черновики, заявки, контакты и дату рождения.
+query Hydrate {
+  me { id firstName lastName email role createdAt organizationId volonteerId }
+  session { expiresAt }
+  events {
+    id title description location startDate endDate requiredVolunteers plannedHours status
+    organizationId organizationName requestsCount approvedVolunteersCount ratingAvg reviewsCount createdAt
+  }
+  organizations { id name inn contactPerson email phone description createdAt }
+  volonteers { id fullName firstName lastName email phone birthDate studentId faculty totalConfirmedHours createdAt }
+  requests {
+    id volonteerId volonteerName volonteerFaculty volonteerStudentId eventId eventTitle eventDate eventStatus
+    organizationName status requestedHours confirmedHours rejectionReason createdAt updatedAt
+  }
+  reviews { id eventId volonteerId authorName rating text createdAt updatedAt }
+  mapMarkers {
+    id type status title description lat lng urgency contactPhone lastSeenDate lastSeenLocation photos
+    closureProof { photo note targetStatus submittedBy submittedByName submittedAt approvedAt approvedBy rejectedAt rejectReason }
+    createdBy createdByName createdAt
   }
 }
 
-mutation RegisterUser(
-  $firstName: String!
-  $lastName: String!
-  $email: String!
-  $password: String!
-  $role: UserRole!
-) {
-  register(
-    firstName: $firstName
-    lastName: $lastName
-    email: $email
-    password: $password
-    role: $role
-  ) {
-    token
-    user {
-      id
-      firstName
-      lastName
-      email
-      role
-    }
+# ---------- Аутентификация -----------------------------------------------------
+mutation Login($email: String!, $password: String!) {
+  login(email: $email, password: $password) { user { id firstName lastName email role } expiresAt }
+}
+mutation Register($firstName: String!, $lastName: String!, $email: String!, $password: String!, $role: UserRole!) {
+  register(firstName: $firstName, lastName: $lastName, email: $email, password: $password, role: $role) {
+    user { id role } expiresAt
   }
 }
+mutation Logout { logout }
+mutation ChangePassword($old: String!, $new: String!) { changePassword(oldPassword: $old, newPassword: $new) }
 
-mutation LoginUser($email: String!, $password: String!) {
-  login(email: $email, password: $password) {
-    token
-    user {
-      id
-      firstName
-      lastName
-      email
-      role
-    }
-  }
+# ---------- Администратор ------------------------------------------------------
+mutation RegisterOrganization($name: String!, $contactPerson: String!, $email: String!, $phone: String!, $inn: String, $description: String) {
+  registerOrganization(name: $name, contactPerson: $contactPerson, email: $email, phone: $phone, inn: $inn, description: $description) { id name }
 }
-
-# ------------------------------------------------------------------------------
-# 2. ОРГАНИЗАЦИИ И ВОЛОНТЁРЫ
-# ------------------------------------------------------------------------------
-
-query GetOrganizations {
-  organizations {
-    id
-    name
-    inn
-    contactPerson
-    email
-    phone
-    description
-    createdAt
-  }
+mutation RegisterVolonteer($fullName: String!, $email: String!, $phone: String!, $studentId: String, $faculty: String, $birthDate: String) {
+  registerVolonteer(fullName: $fullName, email: $email, phone: $phone, studentId: $studentId, faculty: $faculty, birthDate: $birthDate) { id fullName }
 }
+# DRAFT → ACCEPTED | CANCELLED
+mutation ModerateEvent($eventId: ID!, $status: EventStatus!) { moderateEvent(eventId: $eventId, status: $status) { id status } }
+mutation ApproveMarkerClose($markerId: ID!) { approveMarkerClose(markerId: $markerId) { id status } }
+mutation RejectMarkerClose($markerId: ID!, $reason: String) { rejectMarkerClose(markerId: $markerId, reason: $reason) { id status } }
+query Users { users { id email role createdAt } }
 
-query GetVolunteers {
-  volonteers {
-    id
-    fullName
-    email
-    phone
-    studentId
-    faculty
-    totalConfirmedHours
-    createdAt
-  }
-}
-
-mutation RegisterOrganization(
-  $name: String!
-  $contactPerson: String!
-  $email: String!
-  $phone: String!
-  $inn: String
-  $description: String
-) {
-  registerOrganization(
-    name: $name
-    contactPerson: $contactPerson
-    email: $email
-    phone: $phone
-    inn: $inn
-    description: $description
-  ) {
-    id
-    name
-    email
-  }
-}
-
-mutation RegisterVolunteer(
-  $fullName: String!
-  $email: String!
-  $phone: String!
-  $studentId: String
-  $faculty: String
-  $birthDate: String
-) {
-  registerVolonteer(
-    fullName: $fullName
-    email: $email
-    phone: $phone
-    studentId: $studentId
-    faculty: $faculty
-    birthDate: $birthDate
-  ) {
-    id
-    fullName
-    email
-    studentId
-    faculty
-  }
-}
-
-# ------------------------------------------------------------------------------
-# 3. СОБЫТИЯ (EVENTS)
-# ------------------------------------------------------------------------------
-
-query GetAvailableEvents {
-  availableEvents {
-    id
-    title
-    description
-    location
-    startDate
-    endDate
-    requiredVolunteers
-    plannedHours
-    status
-    organizationId
-    organization {
-      id
-      name
-    }
-  }
-}
-
-query GetAllEvents($status: EventStatus) {
-  events(status: $status) {
-    id
-    title
-    description
-    location
-    startDate
-    endDate
-    requiredVolunteers
-    plannedHours
-    status
-    organizationId
-  }
-}
-
+# ---------- Организатор --------------------------------------------------------
 mutation CreateEvent(
-  $title: String!
-  $description: String!
-  $location: String!
-  $startDate: String!
-  $endDate: String!
-  $requiredVolunteers: Int!
-  $plannedHours: Float!
-  $organizationId: ID!
+  $title: String!, $description: String!, $location: String!, $startDate: String!, $endDate: String!,
+  $requiredVolunteers: Int!, $plannedHours: Float!, $organizationId: ID!
 ) {
   createEvent(
-    title: $title
-    description: $description
-    location: $location
-    startDate: $startDate
-    endDate: $endDate
-    requiredVolunteers: $requiredVolunteers
-    plannedHours: $plannedHours
-    organizationId: $organizationId
-  ) {
-    id
-    title
-    status
-    createdAt
-  }
+    title: $title, description: $description, location: $location, startDate: $startDate, endDate: $endDate,
+    requiredVolunteers: $requiredVolunteers, plannedHours: $plannedHours, organizationId: $organizationId
+  ) { id title status }
 }
-
-mutation ModerateEvent($eventId: ID!, $status: EventStatus!) {
-  moderateEvent(eventId: $eventId, status: $status) {
-    id
-    status
-  }
-}
-
-mutation CloseEvent($eventId: ID!) {
-  closeEvent(eventId: $eventId) {
-    id
-    status
-  }
-}
-
-# ------------------------------------------------------------------------------
-# 4. ЗАЯВКИ ВОЛОНТЁРОВ (REQUESTS)
-# ------------------------------------------------------------------------------
-
-query GetRequests($volonteerId: ID, $eventId: ID, $status: RequestStatus) {
-  requests(volonteerId: $volonteerId, eventId: $eventId, status: $status) {
-    id
-    volonteerId
-    eventId
-    status
-    requestedHours
-    confirmedHours
-    createdAt
-  }
-}
-
-mutation SubmitEventRequest($volonteerId: ID!, $eventId: ID!) {
-  submitEventRequest(volonteerId: $volonteerId, eventId: $eventId) {
-    id
-    status
-    createdAt
-  }
-}
-
+# OPEN → ACCEPTED | CANCELLED
 mutation ModerateRequest($requestId: ID!, $status: RequestStatus!, $rejectionReason: String) {
-  moderateRequest(requestId: $requestId, status: $status, rejectionReason: $rejectionReason) {
-    id
-    status
-    rejectionReason
-  }
+  moderateRequest(requestId: $requestId, status: $status, rejectionReason: $rejectionReason) { id status }
 }
-
+# ACCEPTED → CONFIRMED (один раз)
 mutation ConfirmVolunteerWork($requestId: ID!, $confirmedHours: Float!) {
-  confirmVolunteerWork(requestId: $requestId, confirmedHours: $confirmedHours) {
-    id
-    status
-    confirmedHours
+  confirmVolunteerWork(requestId: $requestId, confirmedHours: $confirmedHours) { id status confirmedHours }
+}
+# ACCEPTED → CLOSED
+mutation CloseEvent($eventId: ID!) { closeEvent(eventId: $eventId) { id status } }
+
+# ---------- Волонтёр -----------------------------------------------------------
+mutation SubmitEventRequest($volonteerId: ID!, $eventId: ID!) { submitEventRequest(volonteerId: $volonteerId, eventId: $eventId) { id status } }
+# OPEN → CANCELLED
+mutation CancelEventRequest($requestId: ID!) { cancelEventRequest(requestId: $requestId) { id status } }
+mutation SubmitEventReview($eventId: ID!, $volonteerId: ID!, $rating: Int!, $text: String!) {
+  submitEventReview(eventId: $eventId, volonteerId: $volonteerId, rating: $rating, text: $text) { id }
+}
+mutation DeleteEventReview($reviewId: ID!) { deleteEventReview(reviewId: $reviewId) }
+query VolonteerStatement($v: ID!, $s: String!, $e: String!) {
+  volonteerStatement(volonteerId: $v, startDate: $s, endDate: $e) {
+    volunteer { id fullName studentId faculty } startDate endDate generatedAt totalHours closedEventsCount
+    items { eventName organizationName eventDate location confirmedHours }
   }
 }
 
-# ------------------------------------------------------------------------------
-# 5. ОФИЦИАЛЬНАЯ ВЫПИСКА ПО ЧАСАМ (STATEMENT)
-# ------------------------------------------------------------------------------
-
-query GetVolunteerStatement($volonteerId: ID!, $startDate: String!, $endDate: String!) {
-  volonteerStatement(
-    volonteerId: $volonteerId
-    startDate: $startDate
-    endDate: $endDate
-  ) {
-    volonteer {
-      id
-      fullName
-      studentId
-      faculty
-    }
-    startDate
-    endDate
-    totalHours
-    closedEventsCount
-    items {
-      eventName
-      organizationName
-      eventDate
-      confirmedHours
-    }
-  }
+# ---------- Карта --------------------------------------------------------------
+# photos — data URL (JPEG/PNG/WebP), до 5 штук, только для SEARCH_RESCUE. Сервер перекодирует их в JPEG,
+# удалит EXIF и сохранит в PostgreSQL; клиент получит ссылки вида /media/photos/{id}.
+mutation CreateMapMarker($input: MapMarkerInput!) { createMapMarker(input: $input) { id title lat lng photos } }
+# ACTIVE → PENDING_APPROVAL (фото обязательно)
+mutation RequestMarkerClose($markerId: ID!, $photo: String, $note: String!, $targetStatus: MapMarkerStatus!) {
+  requestMarkerClose(markerId: $markerId, photo: $photo, note: $note, targetStatus: $targetStatus) { id status }
 }
-
-
-# ------------------------------------------------------------------------------
-# ОТЗЫВЫ О МЕРОПРИЯТИЯХ
-# ------------------------------------------------------------------------------
-
-query GetEventReviews($eventId: ID!) {
-  eventReviews(eventId: $eventId) {
-    id
-    authorName
-    rating
-    text
-    createdAt
-    updatedAt
-  }
-}
-
-mutation SubmitEventReview(
-  $eventId: ID!
-  $volonteerId: ID!
-  $rating: Int!
-  $text: String!
-) {
-  submitEventReview(
-    eventId: $eventId
-    volonteerId: $volonteerId
-    rating: $rating
-    text: $text
-  ) {
-    id
-    rating
-    text
-    createdAt
-    updatedAt
-  }
-}
-
-mutation DeleteEventReview($reviewId: ID!) {
-  deleteEventReview(reviewId: $reviewId)
-}
-
-# ------------------------------------------------------------------------------
-# КАРТА: МЕТКИ ПСО С ФОТОГРАФИЯМИ
-# ------------------------------------------------------------------------------
-
-query GetMapMarkers($type: MapMarkerType) {
-  mapMarkers(type: $type) {
-    id
-    type
-    status
-    title
-    lat
-    lng
-    urgency
-    photos
-    closureProof {
-      photo
-      note
-      targetStatus
-    }
-  }
-}
-
-mutation CreateMapMarker($input: MapMarkerInput!) {
-  createMapMarker(input: $input) {
-    id
-    status
-    photos
-    createdAt
-  }
-}
+mutation CloseMapMarker($markerId: ID!) { closeMapMarker(markerId: $markerId) { id status } }
+mutation DeleteMapMarker($markerId: ID!) { deleteMapMarker(markerId: $markerId) }

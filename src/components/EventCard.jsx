@@ -19,7 +19,7 @@ export default function EventCard({
   onShowReviews,
   latestReview,
 }) {
-  const status = EVENT_STATUS[event.status] || EVENT_STATUS.CREATED;
+  const status = EVENT_STATUS[event.status] || EVENT_STATUS.DRAFT;
   const showRating = onShowReviews && (event.status === 'CLOSED' || event.reviewsCount > 0);
 
   return (

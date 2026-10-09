@@ -3,7 +3,15 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  server: { port: 3000, open: true },
+  // В разработке запросы к API и фото проксируются на Rust-сервер (cookie остаются «своими» для браузера)
+  server: {
+    port: 3000,
+    open: true,
+    proxy: {
+      '/graphql': { target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080', changeOrigin: false },
+      '/media': { target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080', changeOrigin: false },
+    },
+  },
   preview: { port: 3000 },
   build: {
     target: 'es2020',

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import Header, { getNavItems } from './components/Header.jsx';
 import PhotoLightbox from './components/PhotoLightbox.jsx';
 import { useUI } from './components/UIContext.jsx';
@@ -7,6 +7,7 @@ import ContextBanner from './views/ContextBanner.jsx';
 import PublicView from './views/PublicView.jsx';
 import ModalRoot from './modals/ModalRoot.jsx';
 import PageLoader from './components/PageLoader.jsx';
+import { EmptyState } from './components/Common.jsx';
 
 // Витрина грузится сразу (её видит каждый гость), кабинеты и карта — по требованию.
 // Карта тянет Leaflet (~150 КБ), поэтому вынесена в отдельный чанк.
@@ -40,10 +41,16 @@ export default function App() {
   const { showToast, openModal } = useUI();
   const user = store.getCurrentUser();
 
-  const [view, setViewState] = useState(() => {
+  const [view, setViewState] = useState('PUBLIC');
+
+  // Когда сервер ответил в первый раз, возвращаем пользователя в раздел, где он был (если он ему доступен)
+  const restored = useRef(false);
+  useEffect(() => {
+    if (store.status !== 'ready' || restored.current) return;
+    restored.current = true;
     const saved = store.getCurrentRole();
-    return isAllowed(store.getCurrentUser(), saved) ? saved : 'PUBLIC';
-  });
+    if (isAllowed(store.getCurrentUser(), saved)) setViewState(saved);
+  }, [store, store.status, user]);
 
   const navigate = useCallback((next) => {
     const currentUser = store.getCurrentUser();
@@ -65,34 +72,38 @@ export default function App() {
     if (!isAllowed(user, view)) setViewState('PUBLIC');
   }, [user, view]);
 
-  const logout = () => {
-    store.logout();
+  const logout = async () => {
+    await store.logout();
     showToast('Вы вышли из учётной записи', 'info');
     setViewState('PUBLIC');
-  };
-
-  const reset = () => {
-    if (!window.confirm('Сбросить все данные к исходным демонстрационным?')) return;
-    store.reset();
-    setViewState('PUBLIC');
-    showToast('Демо-данные восстановлены');
   };
 
   const View = VIEWS[view] || PublicView;
 
   return (
     <>
-      <Header view={view} onNavigate={navigate} onLogout={logout} onReset={reset} onPreload={(v) => PRELOAD[v]?.()} />
+      <Header view={view} onNavigate={navigate} onLogout={logout} onPreload={(v) => PRELOAD[v]?.()} />
       <main className="main-content" id="main">
-        {view !== 'PUBLIC' && <ContextBanner view={view} />}
-        <Suspense fallback={<PageLoader />}>
-          <View />
-        </Suspense>
+        {store.status === 'error' ? (
+          <EmptyState icon="cross" title="Сервер недоступен">
+            <p>{store.error || 'Не удалось получить данные.'}</p>
+            <button type="button" className="btn btn-primary" onClick={() => store.init()}>Повторить попытку</button>
+          </EmptyState>
+        ) : store.status !== 'ready' ? (
+          <PageLoader />
+        ) : (
+          <>
+            {view !== 'PUBLIC' && <ContextBanner view={view} />}
+            <Suspense fallback={<PageLoader />}>
+              <View />
+            </Suspense>
+          </>
+        )}
       </main>
       <footer className="app-footer no-print">
         <div className="footer-inner">
           <span>Волонтёрский центр ДГТУ «Горящие сердца»</span>
-          <span>Хакатон ВЕСНА '25. Демо-данные хранятся в вашем браузере</span>
+          <span>Хакатон ВЕСНА '25. Данные хранятся на сервере в PostgreSQL</span>
         </div>
       </footer>
       <ModalRoot onAuthenticated={(role) => navigate(role)} onLogout={logout} />

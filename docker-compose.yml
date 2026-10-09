@@ -1,0 +1,21 @@
+# Локальная PostgreSQL для разработки: `docker compose up -d db`
+# (Файл не проверялся в среде разработки без Docker — при проблемах используйте обычную установку PostgreSQL 16, см. docs/BACKEND.md.)
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: volontiers
+      POSTGRES_PASSWORD: volontiers_dev
+      POSTGRES_DB: volontiers
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - volontiers-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U volontiers -d volontiers"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  volontiers-pg:
