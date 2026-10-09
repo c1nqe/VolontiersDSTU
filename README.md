@@ -50,7 +50,7 @@
 ```bash
 git clone https://github.com/c1nqe/VolontiersDSTU.git
 cd VolontiersDSTU
-git checkout feature/rust-postgres-backend
+git checkout dev2
 
 docker compose up -d db          # PostgreSQL 16 (или поставьте его обычным установщиком, см. docs/BACKEND.md)
 
@@ -264,7 +264,7 @@ cd backend && TEST_DATABASE_URL=postgres://volontiers:volontiers_dev@127.0.0.1:5
 
 - `main` — стабильная версия на чистом JavaScript.
 - `dev-v.01` — версия на React с отзывами, фото в метках ПСО и новой вёрсткой (без сервера).
-- `feature/rust-postgres-backend` — сервер на Rust и PostgreSQL, отмена принятых событий и заявок, саморегистрация организаторов, требования 152-ФЗ, закрытые ПСО исчезают сразу.
+- `dev2` — сервер на Rust и PostgreSQL, отмена принятых событий и заявок, саморегистрация организаторов, требования 152-ФЗ, закрытые ПСО исчезают сразу.
 
 Перед отправкой изменений выполните `npm test`, `npm run build` и `cargo test` в `backend`. Сообщения коммитов пишутся в формате `feat: …`, `fix: …`, `docs: …`.
 
