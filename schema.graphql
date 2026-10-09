@@ -141,6 +141,10 @@ type Mutation {
 	logout: Boolean!
 	changePassword(oldPassword: String!, newPassword: String!): Boolean!
 	"""
+	Волонтёр правит свой профиль; передаются только изменяемые поля (пустая строка очищает факультет и номер билета).
+	"""
+	updateMyProfile(firstName: String, lastName: String, phone: String, faculty: String, studentId: String): Volonteer!
+	"""
 	Все данные пользователя о нём самом в виде JSON (право на доступ к данным, 152-ФЗ).
 	"""
 	exportMyData: String!

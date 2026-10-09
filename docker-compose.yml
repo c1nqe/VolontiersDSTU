@@ -1,5 +1,6 @@
 # Локальная PostgreSQL для разработки: `docker compose up -d db`
-# (Файл не проверялся в среде разработки без Docker — при проблемах используйте обычную установку PostgreSQL 16, см. docs/BACKEND.md.)
+# Сервер в контейнере: `docker compose --profile app up --build` (нужен backend/.env.docker с DATABASE_URL, JWT_SECRET, ALLOWED_ORIGINS).
+# (Файл и Dockerfile не проверялись в среде разработки без Docker — при проблемах используйте обычную установку PostgreSQL 16, см. docs/BACKEND.md.)
 services:
   db:
     image: postgres:16
@@ -17,5 +18,14 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  app:
+    profiles: ["app"]
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: backend/.env.docker
+    ports:
+      - "127.0.0.1:8080:8080"
 volumes:
   volontiers-pg:

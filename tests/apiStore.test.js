@@ -193,6 +193,26 @@ describe('ApiStore: отмена, регистрация и персональн
     expect(res.fileName).toMatch(/^moi-dannye-volontery-\d{4}-\d{2}-\d{2}\.json$/);
   });
 
+  it('редактирование профиля отправляет только заданные поля, остальные — null', async () => {
+    const client = fakeClient({ updateMyProfile: () => ({ updateMyProfile: { id: 'v1' } }) });
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    const res = await store.updateMyProfile({ phone: '+7 900 000-00-00', faculty: '' });
+    expect(res.success).toBe(true);
+    const call = client.calls.find((c) => c.query.includes('updateMyProfile'));
+    expect(call.variables).toEqual({ firstName: null, lastName: null, phone: '+7 900 000-00-00', faculty: '', studentId: null });
+  });
+
+  it('смена пароля передаёт старый и новый пароль; ошибка сервера возвращается как сообщение', async () => {
+    const client = fakeClient({ changePassword: (v) => { if (v.o === 'bad') throw Object.assign(new Error('Текущий пароль указан неверно'), { code: 'BAD_USER_INPUT' }); return { changePassword: true }; } });
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    expect((await store.changePassword('vol123', 'Новый-пароль-2026')).success).toBe(true);
+    const bad = await store.changePassword('bad', 'Новый-пароль-2026');
+    expect(bad.success).toBe(false);
+    expect(bad.message).toMatch(/неверно/);
+  });
+
   it('удаление аккаунта: пароль уходит на сервер, роль интерфейса сбрасывается', async () => {
     let deleted = false;
     const client = vi.fn(async (query, variables) => {

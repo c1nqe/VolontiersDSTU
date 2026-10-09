@@ -595,3 +595,54 @@ async fn privacy_export_and_account_deletion() {
     assert_eq!(code, "BAD_USER_INPUT");
     env.cleanup().await;
 }
+
+// ------------------------------------------------------------------------------------------------
+#[tokio::test]
+async fn capacity_profile_and_password() {
+    let env = Env::new().await;
+    let (org, vol) = org_and_vol_ids(&env).await;
+    let (a, o, v) = (env.admin().await, env.organizer().await, env.volunteer().await);
+
+    // --- вместимость: событие на одного волонтёра
+    let d = env.ok(Some(&o), "mutation($org:ID!){createEvent(title:\"Событие на одного\",description:\"Описание\",location:\"Место\",startDate:\"2026-12-05\",endDate:\"2026-12-05\",requiredVolunteers:1,plannedHours:2,organizationId:$org){id}}", json!({"org": org})).await;
+    let ev = d["createEvent"]["id"].as_str().unwrap().to_string();
+    env.ok(Some(&a), "mutation($e:ID!){moderateEvent(eventId:$e,status:ACCEPTED){status}}", json!({"e": ev})).await;
+    let other_vol = env.ok(Some(&a), "{ volonteers { id } }", json!({})).await["volonteers"].as_array().unwrap().iter().map(|x| x["id"].as_str().unwrap().to_string()).find(|x| *x != vol).unwrap();
+    let sub = "mutation($v:ID!,$e:ID!){submitEventRequest(volonteerId:$v,eventId:$e){id}}";
+    let r1 = env.ok(Some(&v), sub, json!({"v": vol, "e": ev})).await["submitEventRequest"]["id"].as_str().unwrap().to_string();
+    let r2 = env.ok(Some(&a), sub, json!({"v": other_vol, "e": ev})).await["submitEventRequest"]["id"].as_str().unwrap().to_string();
+    let acc = "mutation($r:ID!){moderateRequest(requestId:$r,status:ACCEPTED){status}}";
+    env.ok(Some(&o), acc, json!({"r": r1})).await;
+    let (m, code) = env.err(Some(&o), acc, json!({"r": r2})).await;
+    assert_eq!(code, "CONFLICT", "{m}");
+    assert!(m.contains("1 из 1"), "{m}");
+    // отозвали первую — место освободилось
+    env.ok(Some(&o), "mutation($r:ID!){moderateRequest(requestId:$r,status:CANCELLED,rejectionReason:\"Передумали\"){status}}", json!({"r": r1})).await;
+    env.ok(Some(&o), acc, json!({"r": r2})).await;
+
+    // --- профиль: волонтёр правит свои данные, остальные поля не трогаются
+    let upd = "mutation($p:String,$f:String,$s:String,$n:String){updateMyProfile(firstName:$n,phone:$p,faculty:$f,studentId:$s){firstName lastName phone faculty studentId}}";
+    let d = env.ok(Some(&v), upd, json!({"p": "+7 900 111-22-33", "f": "Информатика", "s": "12345", "n": null})).await;
+    assert_eq!(d["updateMyProfile"]["phone"], "+7 900 111-22-33");
+    assert_eq!(d["updateMyProfile"]["faculty"], "Информатика");
+    assert_eq!(d["updateMyProfile"]["lastName"], "Иванов", "фамилия не изменена");
+    let d = env.ok(Some(&v), upd, json!({"p": null, "f": "", "s": null, "n": "Алексей"})).await;
+    assert!(d["updateMyProfile"]["faculty"].is_null(), "пустая строка очищает факультет");
+    assert_eq!(d["updateMyProfile"]["phone"], "+7 900 111-22-33", "телефон остался");
+    let (_, code) = env.err(Some(&v), upd, json!({"p": null, "f": null, "s": null, "n": ""})).await;
+    assert_eq!(code, "BAD_USER_INPUT", "имя не может быть пустым");
+    let (_, code) = env.err(Some(&o), upd, json!({"p": "1", "f": null, "s": null, "n": null})).await;
+    assert_eq!(code, "FORBIDDEN", "профиль волонтёра правит только волонтёр");
+    let (_, code) = env.err(None, upd, json!({"p": "1", "f": null, "s": null, "n": null})).await;
+    assert_eq!(code, "UNAUTHENTICATED");
+
+    // --- смена пароля: старый перестаёт работать, сессии отзываются
+    let chg = "mutation($o:String!,$n:String!){changePassword(oldPassword:$o,newPassword:$n)}";
+    let (m, _) = env.err(Some(&v), chg, json!({"o": "неверный-пароль1", "n": "Новый-пароль-2026"})).await;
+    assert!(m.contains("пароль"), "{m}");
+    env.ok(Some(&v), chg, json!({"o": "vol123", "n": "Новый-пароль-2026"})).await;
+    let (_, code) = env.err(None, "mutation{login(email:\"volunteer@donstu.ru\",password:\"vol123\"){user{id}}}", json!({})).await;
+    assert_eq!(code, "BAD_USER_INPUT", "старый пароль больше не подходит");
+    env.login("volunteer@donstu.ru", "Новый-пароль-2026").await;
+    env.cleanup().await;
+}

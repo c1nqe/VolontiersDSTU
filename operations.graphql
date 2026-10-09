@@ -43,6 +43,9 @@ mutation Logout { logout }
 # 152-ФЗ: выгрузка всех данных о себе (JSON) и удаление учётной записи с обезличиванием
 mutation ExportMyData { exportMyData }
 mutation DeleteMyAccount($password: String!) { deleteMyAccount(password: $password) }
+mutation UpdateMyProfile($firstName: String, $lastName: String, $phone: String, $faculty: String, $studentId: String) {
+  updateMyProfile(firstName: $firstName, lastName: $lastName, phone: $phone, faculty: $faculty, studentId: $studentId) { id fullName phone faculty studentId }
+}
 mutation ChangePassword($old: String!, $new: String!) { changePassword(oldPassword: $old, newPassword: $new) }
 
 # ---------- Администратор ------------------------------------------------------

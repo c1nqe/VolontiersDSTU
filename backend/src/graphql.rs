@@ -80,6 +80,10 @@ impl Mutation {
         Ok(svc::change_password(ctx, &old_password, &new_password).await?)
     }
 
+    /// Волонтёр правит свой профиль; передаются только изменяемые поля (пустая строка очищает факультет и номер билета).
+    async fn update_my_profile(&self, ctx: &Context<'_>, first_name: Option<String>, last_name: Option<String>, phone: Option<String>, faculty: Option<String>, student_id: Option<String>) -> Result<Volonteer> {
+        Ok(svc::update_my_profile(ctx, first_name, last_name, phone, faculty, student_id).await?)
+    }
     /// Все данные пользователя о нём самом в виде JSON (право на доступ к данным, 152-ФЗ).
     async fn export_my_data(&self, ctx: &Context<'_>) -> Result<String> { Ok(svc::export_my_data(ctx).await?) }
     /// Удаление учётной записи с немедленным обезличиванием персональных данных. Требует пароль.

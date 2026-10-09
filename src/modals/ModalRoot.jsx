@@ -13,6 +13,8 @@ const REGISTRY = {
   privacy: lazy(() => import('./PrivacyModal.jsx')),
   cancelEvent: lazy(() => import('./CancelEventModal.jsx')),
   deleteAccount: lazy(() => import('./DeleteAccountModal.jsx')),
+  editProfile: lazy(() => import('./EditProfileModal.jsx')),
+  changePassword: lazy(() => import('./ChangePasswordModal.jsx')),
 };
 
 /** Рендерит текущее модальное окно. Одновременно открыто не больше одного. */

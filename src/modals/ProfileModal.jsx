@@ -112,6 +112,16 @@ export default function ProfileModal({ onClose, onLogout }) {
             <div><strong>Пароль:</strong> на сервере хранится только хэш Argon2id</div>
             <div><strong>Выход:</strong> завершает сессию на всех устройствах</div>
           </div>
+          <div className="btn-row-wrap" style={{ marginTop: '0.7rem' }}>
+            {user.role === 'VOLUNTEER' && (
+              <button type="button" className="btn btn-outline btn-sm" onClick={() => openModal('editProfile')}>
+                <Icon name="user" /> Редактировать профиль
+              </button>
+            )}
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => openModal('changePassword')}>
+              <Icon name="lock" /> Сменить пароль
+            </button>
+          </div>
         </div>
 
         <div className="info-panel">

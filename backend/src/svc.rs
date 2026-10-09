@@ -382,6 +382,27 @@ pub async fn register_volonteer(ctx: &Context<'_>, full_name: &str, email: &str,
     Ok(Volonteer::from_row(row, VolAccess::Full))
 }
 
+/// Волонтёр правит свой профиль: имя, фамилию, телефон, факультет, номер билета. Передаются только изменяемые поля.
+pub async fn update_my_profile(ctx: &Context<'_>, first_name: Option<String>, last_name: Option<String>, phone: Option<String>, faculty: Option<String>, student_id: Option<String>) -> AppResult<Volonteer> {
+    let v = need(ctx)?;
+    let vol_id = v.volonteer_id.ok_or(AppError::Forbidden)?;
+    let first = first_name.as_deref().map(|s| clean(s, "Имя", 1, 100)).transpose()?;
+    let last = last_name.as_deref().map(|s| clean(s, "Фамилия", 1, 100)).transpose()?;
+    let phone = phone.as_deref().map(|s| clean(s, "Телефон", 0, 40)).transpose()?;
+    let faculty = faculty.as_deref().map(|s| clean(s, "Факультет", 0, 200)).transpose()?;
+    let student = student_id.as_deref().map(|s| clean(s, "Студенческий билет", 0, 40)).transpose()?;
+    let mut tx = st(ctx).pool.begin().await?;
+    sqlx::query("UPDATE persons SET first_name = COALESCE($2, first_name), last_name = COALESCE($3, last_name) WHERE id = (SELECT person_id FROM volonteers WHERE id = $1)")
+        .bind(vol_id).bind(&first).bind(&last).execute(&mut *tx).await?;
+    // пустая строка очищает необязательное поле, отсутствие аргумента оставляет как есть
+    sqlx::query("UPDATE volonteers SET phone = COALESCE($2, phone), faculty = CASE WHEN $3::text IS NULL THEN faculty ELSE NULLIF($3, '') END, student_id = CASE WHEN $4::text IS NULL THEN student_id ELSE NULLIF($4, '') END WHERE id = $1")
+        .bind(vol_id).bind(&phone).bind(&faculty).bind(&student).execute(&mut *tx).await?;
+    audit(&mut tx, Some(v), "profile.update", "volonteer", Some(vol_id), json!({"fields": {"name": first.is_some() || last.is_some(), "phone": phone.is_some(), "faculty": faculty.is_some(), "studentId": student.is_some()}})).await?;
+    let row = sqlx::query_as::<_, VolonteerRow>(&format!("{VOL_SELECT} WHERE v.id = $1")).bind(vol_id).fetch_one(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(Volonteer::from_row(row, VolAccess::Full))
+}
+
 // ---------- События --------------------------------------------------------------------------------------
 async fn fetch_event(conn: &mut PgConnection, id: Uuid) -> AppResult<Event> {
     sqlx::query_as::<_, EventRow>(&format!("{EVENT_SELECT} WHERE e.id = $1")).bind(id).fetch_optional(conn).await?
@@ -551,6 +572,18 @@ pub async fn moderate_request(ctx: &Context<'_>, id: Uuid, status: RequestStatus
     let mut tx = st(ctx).pool.begin().await?;
     let (org, _) = request_owner(&mut tx, id).await?;
     if !v.can_act_for_org(org) { return Err(AppError::Forbidden); }
+    if status == RequestStatus::Accepted {
+        // вместимость: блокируем строку события, чтобы две одновременные заявки не заняли последнее место
+        let (needed, taken): (i32, i64) = sqlx::query_as(
+            "SELECT e.required_volunteers,
+                    (SELECT count(*) FROM volonteer_event_requests x WHERE x.event_id = e.id AND x.status IN ('ACCEPTED','CONFIRMED'))
+               FROM events e WHERE e.id = (SELECT event_id FROM volonteer_event_requests WHERE id = $1) FOR UPDATE OF e")
+            .bind(id).fetch_one(&mut *tx).await?;
+        let already: bool = sqlx::query_scalar("SELECT status IN ('ACCEPTED','CONFIRMED') FROM volonteer_event_requests WHERE id = $1").bind(id).fetch_one(&mut *tx).await?;
+        if !already && taken >= needed as i64 {
+            return Err(AppError::conflict(format!("Все места заняты: принято {taken} из {needed} волонтёров. Отзовите чью-то заявку, чтобы принять эту")));
+        }
+    }
     let n = sqlx::query("UPDATE volonteer_event_requests SET status = $2, rejection_reason = $3 WHERE id = $1 AND (status = 'OPEN' OR ($2::request_status = 'CANCELLED' AND status = 'ACCEPTED'))")
         .bind(id).bind(status).bind(if status == RequestStatus::Cancelled { reason } else { None }).execute(&mut *tx).await?.rows_affected();
     if n == 0 { return Err(AppError::conflict("Решение по заявке уже принято и изменить его нельзя")); }

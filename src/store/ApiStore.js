@@ -184,6 +184,20 @@ export class ApiStore {
     }
   }
 
+  /** Волонтёр правит свой профиль; передаются только изменённые поля (пустая строка очищает факультет и номер билета). */
+  updateMyProfile(fields) {
+    const v = { firstName: null, lastName: null, phone: null, faculty: null, studentId: null, ...fields };
+    return this.mutate(
+      'mutation($firstName:String,$lastName:String,$phone:String,$faculty:String,$studentId:String){ updateMyProfile(firstName:$firstName,lastName:$lastName,phone:$phone,faculty:$faculty,studentId:$studentId){ id } }',
+      v,
+    );
+  }
+
+  /** Смена пароля: сервер отзывает старые сессии и выдаёт новую. */
+  changePassword(oldPassword, newPassword) {
+    return this.mutate('mutation($o:String!,$n:String!){ changePassword(oldPassword:$o,newPassword:$n) }', { o: oldPassword, n: newPassword });
+  }
+
   /** Удаляет учётную запись с немедленным обезличиванием данных; после успеха пользователь — гость. */
   async deleteMyAccount(password) {
     const res = await this.mutate('mutation($password:String!){ deleteMyAccount(password:$password) }', { password });
