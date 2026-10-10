@@ -65,6 +65,8 @@ pub struct User {
     pub consent_accepted_at: Option<String>,
     /// Версия политики обработки ПДн, с которой пользователь согласился.
     pub consent_version: Option<String>,
+    /// Подтверждён ли адрес электронной почты (по ссылке из письма).
+    pub email_verified: bool,
 }
 
 #[derive(FromRow, Debug)]
@@ -79,17 +81,18 @@ pub struct UserRow {
     pub volonteer_id: Option<Uuid>,
     pub consent_at: Option<DateTime<Utc>>,
     pub consent_version: Option<String>,
+    pub email_verified_at: Option<DateTime<Utc>>,
 }
 impl From<UserRow> for User {
     fn from(r: UserRow) -> Self {
         User {
             id: gid(r.id), first_name: r.first_name, last_name: r.last_name, email: r.email, role: r.role,
             created_at: rfc3339(r.created_at), organization_id: r.organization_id.map(gid), volonteer_id: r.volonteer_id.map(gid),
-            consent_accepted_at: r.consent_at.map(rfc3339), consent_version: r.consent_version,
+            consent_accepted_at: r.consent_at.map(rfc3339), consent_version: r.consent_version, email_verified: r.email_verified_at.is_some(),
         }
     }
 }
-pub const USER_SELECT: &str = "SELECT u.id, p.first_name, p.last_name, u.email, u.role, u.created_at, u.organization_id, u.volonteer_id, u.consent_at, u.consent_version
+pub const USER_SELECT: &str = "SELECT u.id, p.first_name, p.last_name, u.email, u.role, u.created_at, u.organization_id, u.volonteer_id, u.consent_at, u.consent_version, u.email_verified_at
     FROM users u JOIN persons p ON p.id = u.person_id";
 
 #[derive(SimpleObject)]
@@ -440,9 +443,22 @@ pub struct MapMarker {
     pub last_seen_location: Option<String>,
     /// Ссылки вида /media/photos/{id}; сами файлы лежат в PostgreSQL.
     pub photos: Vec<String>,
+    /// Фото на проверке у администратора: видны только автору и администраторам.
+    pub pending_photos: Vec<String>,
     pub closure_proof: Option<ClosureProof>,
     pub created_by: Option<ID>,
     pub created_by_name: String,
+    pub created_at: String,
+}
+
+/// Фото в очереди модерации (только администратор).
+#[derive(SimpleObject, Clone, Debug)]
+pub struct PhotoModerationItem {
+    pub id: ID,
+    pub marker_id: ID,
+    pub marker_title: String,
+    pub url: String,
+    pub uploaded_by_name: Option<String>,
     pub created_at: String,
 }
 

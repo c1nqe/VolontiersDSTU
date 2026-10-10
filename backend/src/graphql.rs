@@ -15,6 +15,8 @@ impl Query {
     async fn session(&self, ctx: &Context<'_>) -> Result<Option<Session>> { Ok(svc::session(ctx).await?) }
     /// Версия действующей политики обработки персональных данных.
     async fn privacy_policy_version(&self) -> &'static str { svc::PRIVACY_POLICY_VERSION }
+    /// Настроена ли отправка писем (восстановление пароля, подтверждение почты).
+    async fn mail_enabled(&self, ctx: &Context<'_>) -> bool { crate::svc::st(ctx).mailer.enabled() }
     /// Список учётных записей — только администратор.
     async fn users(&self, ctx: &Context<'_>) -> Result<Vec<User>> { Ok(svc::users_list(ctx).await?) }
 
@@ -55,6 +57,9 @@ impl Query {
         Ok(svc::reviews_list(ctx, Some(parse_id(&event_id)?), None).await?)
     }
 
+    /// Фото меток, ожидающие проверки (только администратор).
+    async fn photo_moderation_queue(&self, ctx: &Context<'_>) -> Result<Vec<PhotoModerationItem>> { Ok(svc::photo_moderation_queue(ctx).await?) }
+
     async fn map_markers(&self, ctx: &Context<'_>, #[graphql(name = "type")] kind: Option<MapMarkerType>) -> Result<Vec<MapMarker>> {
         Ok(svc::markers_list(ctx, kind).await?)
     }
@@ -76,6 +81,16 @@ impl Mutation {
     }
     /// Завершает все сессии пользователя (token_version++), очищает cookie.
     async fn logout(&self, ctx: &Context<'_>) -> Result<bool> { Ok(svc::logout(ctx).await?) }
+    /// Письмо со ссылкой для нового пароля. Ответ всегда одинаков — по нему нельзя узнать, зарегистрирован ли адрес.
+    async fn request_password_reset(&self, ctx: &Context<'_>, email: String) -> Result<bool> { Ok(svc::request_password_reset(ctx, &email).await?) }
+    /// Новый пароль по токену из письма (токен одноразовый, живёт 1 час). Все прежние сессии отзываются.
+    async fn reset_password(&self, ctx: &Context<'_>, token: String, new_password: String) -> Result<bool> {
+        Ok(svc::reset_password(ctx, &token, &new_password).await?)
+    }
+    /// Подтверждение электронной почты по токену из письма.
+    async fn verify_email(&self, ctx: &Context<'_>, token: String) -> Result<bool> { Ok(svc::verify_email(ctx, &token).await?) }
+    /// Повторно отправить письмо для подтверждения почты (не чаще раза в минуту).
+    async fn resend_verification(&self, ctx: &Context<'_>) -> Result<bool> { Ok(svc::resend_verification(ctx).await?) }
     async fn change_password(&self, ctx: &Context<'_>, old_password: String, new_password: String) -> Result<bool> {
         Ok(svc::change_password(ctx, &old_password, &new_password).await?)
     }
@@ -139,6 +154,12 @@ impl Mutation {
     /// ACTIVE → PENDING_APPROVAL: отчёт с фото о завершении ПСО.
     async fn request_marker_close(&self, ctx: &Context<'_>, marker_id: ID, photo: Option<String>, note: String, target_status: MapMarkerStatus) -> Result<MapMarker> {
         Ok(svc::request_marker_close(ctx, parse_id(&marker_id)?, photo, &note, target_status).await?)
+    }
+    /// Администратор одобряет фото метки: оно становится видно всем.
+    async fn approve_photo(&self, ctx: &Context<'_>, photo_id: ID) -> Result<MapMarker> { Ok(svc::approve_photo(ctx, parse_id(&photo_id)?).await?) }
+    /// Администратор отклоняет фото метки: оно удаляется.
+    async fn reject_photo(&self, ctx: &Context<'_>, photo_id: ID, reason: Option<String>) -> Result<MapMarker> {
+        Ok(svc::reject_photo(ctx, parse_id(&photo_id)?, reason).await?)
     }
     async fn approve_marker_close(&self, ctx: &Context<'_>, marker_id: ID) -> Result<MapMarker> { Ok(svc::approve_marker_close(ctx, parse_id(&marker_id)?).await?) }
     async fn reject_marker_close(&self, ctx: &Context<'_>, marker_id: ID, reason: Option<String>) -> Result<MapMarker> {

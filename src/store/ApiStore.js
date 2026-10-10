@@ -16,13 +16,13 @@ export { MAX_MARKER_PHOTOS, MAX_REVIEW_LENGTH } from './constants.js';
 
 const UI_KEY = 'volontiers_ui_v2';
 
-const USER = 'id firstName lastName email role createdAt organizationId volonteerId consentAcceptedAt consentVersion';
+const USER = 'id firstName lastName email role createdAt organizationId volonteerId consentAcceptedAt consentVersion emailVerified';
 const EVENT = 'id title description location startDate endDate requiredVolunteers plannedHours status cancelReason organizationId organizationName requestsCount approvedVolunteersCount ratingAvg reviewsCount createdAt';
 const ORG = 'id name inn contactPerson email phone description createdAt';
 const VOL = 'id fullName firstName lastName email phone birthDate studentId faculty totalConfirmedHours createdAt';
 const REQ = 'id volonteerId volonteerName volonteerFaculty volonteerStudentId eventId eventTitle eventDate eventStatus organizationName status requestedHours confirmedHours rejectionReason createdAt updatedAt';
 const REVIEW = 'id eventId volonteerId authorName rating text createdAt updatedAt';
-const MARKER = `id type status title description lat lng urgency contactPhone lastSeenDate lastSeenLocation photos
+const MARKER = `id type status title description lat lng urgency contactPhone lastSeenDate lastSeenLocation photos pendingPhotos
   closureProof { photo note targetStatus submittedBy submittedByName submittedAt approvedAt approvedBy rejectedAt rejectReason }
   createdBy createdByName createdAt`;
 
@@ -30,6 +30,7 @@ export const HYDRATE_QUERY = `query Hydrate {
   me { ${USER} }
   session { expiresAt }
   privacyPolicyVersion
+  mailEnabled
   events { ${EVENT} }
   organizations { ${ORG} }
   volonteers { ${VOL} }
@@ -38,7 +39,7 @@ export const HYDRATE_QUERY = `query Hydrate {
   mapMarkers { ${MARKER} }
 }`;
 
-const EMPTY = () => ({ user: null, expiresAt: null, policyVersion: null, events: [], organizations: [], volonteers: [], requests: [], reviews: [], markers: [] });
+const EMPTY = () => ({ user: null, expiresAt: null, policyVersion: null, mailEnabled: false, events: [], organizations: [], volonteers: [], requests: [], reviews: [], markers: [], photoQueue: [] });
 
 function normalizeUser(u) {
   return u ? { ...u, volunteerId: u.volonteerId, orgId: u.organizationId } : null;
@@ -105,6 +106,7 @@ export class ApiStore {
         user: normalizeUser(d.me),
         expiresAt: d.session?.expiresAt || null,
         policyVersion: d.privacyPolicyVersion || null,
+        mailEnabled: Boolean(d.mailEnabled),
         events: d.events || [],
         organizations: d.organizations || [],
         volonteers: d.volonteers || [],
@@ -112,6 +114,14 @@ export class ApiStore {
         reviews: d.reviews || [],
         markers: d.mapMarkers || [],
       };
+      // очередь модерации фото — только для администратора, отдельным запросом
+      this.state.photoQueue = [];
+      if (this.state.user?.role === 'ADMIN') {
+        try {
+          const q = await this.client('{ photoModerationQueue { id markerId markerTitle url uploadedByName createdAt } }');
+          this.state.photoQueue = q.photoModerationQueue || [];
+        } catch { /* очередь не загрузилась — остальное работает */ }
+      }
       this.status = 'ready';
       this.error = null;
     } catch (e) {
@@ -173,6 +183,8 @@ export class ApiStore {
   }
 
   getPolicyVersion() { return this.state.policyVersion; }
+  /** Настроена ли на сервере отправка писем (иначе «Забыли пароль?» и подтверждение почты скрыты). */
+  isMailEnabled() { return this.state.mailEnabled; }
 
   /** Все данные пользователя о нём самом (JSON-текст) — право на доступ к данным. */
   async exportMyData() {
@@ -196,6 +208,24 @@ export class ApiStore {
   /** Смена пароля: сервер отзывает старые сессии и выдаёт новую. */
   changePassword(oldPassword, newPassword) {
     return this.mutate('mutation($o:String!,$n:String!){ changePassword(oldPassword:$o,newPassword:$n) }', { o: oldPassword, n: newPassword });
+  }
+
+  /** Письмо со ссылкой для нового пароля. Ответ не зависит от того, есть ли такой адрес. */
+  requestPasswordReset(email) {
+    return this.mutate('mutation($email:String!){ requestPasswordReset(email:$email) }', { email: String(email).trim() });
+  }
+
+  /** Новый пароль по токену из письма; после успеха нужно войти заново. */
+  resetPassword(token, newPassword) {
+    return this.mutate('mutation($token:String!,$password:String!){ resetPassword(token:$token,newPassword:$password) }', { token, password: newPassword });
+  }
+
+  verifyEmail(token) {
+    return this.mutate('mutation($token:String!){ verifyEmail(token:$token) }', { token });
+  }
+
+  resendVerification() {
+    return this.mutate('mutation{ resendVerification }', {});
   }
 
   /** Удаляет учётную запись с немедленным обезличиванием данных; после успеха пользователь — гость. */
@@ -423,6 +453,17 @@ export class ApiStore {
 
   rejectMarkerClose(markerId, reason) {
     return this.mutate('mutation($markerId:ID!,$reason:String){ rejectMarkerClose(markerId:$markerId,reason:$reason){ id status } }', { markerId, reason }, 'rejectMarkerClose');
+  }
+
+  /** Очередь фото меток, ожидающих проверки (заполняется только у администратора). */
+  getPhotoQueue() { return this.state.photoQueue; }
+
+  approvePhoto(photoId) {
+    return this.mutate('mutation($photoId:ID!){ approvePhoto(photoId:$photoId){ id } }', { photoId }, 'approvePhoto');
+  }
+
+  rejectPhoto(photoId, reason) {
+    return this.mutate('mutation($photoId:ID!,$reason:String){ rejectPhoto(photoId:$photoId,reason:$reason){ id } }', { photoId, reason }, 'rejectPhoto');
   }
 
   closeMarker(markerId) {

@@ -27,6 +27,7 @@ pub struct AppState {
     pub pool: PgPool,
     pub cfg: Arc<Config>,
     pub limiter: Arc<RateLimiter>,
+    pub mailer: Arc<crate::mail::Mailer>,
 }
 
 #[derive(Clone)]
@@ -101,17 +102,27 @@ async fn graphql_handler(State(web): State<Web>, ConnectInfo(peer): ConnectInfo<
 
 /// Фото отдаются только через сервер и только с проверкой прав.
 async fn media_photo(State(web): State<Web>, headers: HeaderMap, Path(id): Path<Uuid>) -> Response {
-    let row: Option<(String, String, Vec<u8>, String)> = match sqlx::query_as(
-        "SELECT purpose::text, content_type, data, sha256 FROM photos WHERE id = $1",
+    let row: Option<(String, String, Vec<u8>, String, String, Option<Uuid>)> = match sqlx::query_as(
+        "SELECT purpose::text, content_type, data, sha256, status::text, uploaded_by FROM photos WHERE id = $1",
     ).bind(id).fetch_optional(&web.state.pool).await {
         Ok(r) => r,
         Err(e) => { tracing::error!(error = ?e, "media"); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     };
-    let Some((purpose, ctype, data, sha)) = row else { return StatusCode::NOT_FOUND.into_response() };
+    let Some((purpose, ctype, data, sha, status, uploader)) = row else { return StatusCode::NOT_FOUND.into_response() };
     let viewer = viewer_of(&web.state, &headers).await;
-    let allowed = match purpose.as_str() {
-        "MARKER" => viewer.is_some() || web.state.cfg.public_marker_photos,
-        _ => viewer.is_some(),
+    let pending = status == "PENDING";
+    let allowed = if pending {
+        // фото на проверке: только автор и администратор; остальным оно «не существует»
+        match &viewer {
+            Some(v) if v.is_admin() || uploader == Some(v.user_id) => true,
+            Some(_) => return StatusCode::NOT_FOUND.into_response(),
+            None => false,
+        }
+    } else {
+        match purpose.as_str() {
+            "MARKER" => viewer.is_some() || web.state.cfg.public_marker_photos,
+            _ => viewer.is_some(),
+        }
     };
     if !allowed {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -120,7 +131,7 @@ async fn media_photo(State(web): State<Web>, headers: HeaderMap, Path(id): Path<
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
         return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
     }
-    let cache = if purpose == "MARKER" && web.state.cfg.public_marker_photos { "public, max-age=3600" } else { "private, max-age=600" };
+    let cache = if pending { "private, no-store" } else if purpose == "MARKER" && web.state.cfg.public_marker_photos { "public, max-age=3600" } else { "private, max-age=600" };
     (
         [
             (header::CONTENT_TYPE, ctype),

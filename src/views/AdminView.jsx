@@ -30,12 +30,14 @@ export default function AdminView() {
   const pendingEvents = events.filter((e) => e.status === 'DRAFT');
   const activeEvents = events.filter((e) => e.status === 'ACCEPTED');
   const pendingMarkers = store.getPendingMarkerApprovals();
+  const photoQueue = store.getPhotoQueue();
   const allReviews = store.getAllReviews();
   const eventTitle = (id) => events.find((e) => e.id === id)?.title || 'Мероприятие удалено';
 
   const tabs = [
     { id: 'moderation', label: 'Модерация событий', icon: 'shield', count: pendingEvents.length },
     { id: 'markers', label: 'Закрытие ПСО', icon: 'camera', count: pendingMarkers.length },
+    { id: 'photos', label: 'Фото меток', icon: 'image', count: photoQueue.length },
     { id: 'reviews', label: 'Отзывы', icon: 'message', count: 0 },
     { id: 'reg-org', label: 'Новый организатор', icon: 'building' },
     { id: 'reg-vol', label: 'Новый волонтёр', icon: 'user' },
@@ -48,6 +50,13 @@ export default function AdminView() {
     const reason = window.prompt('Укажите причину отклонения заявки на закрытие ПСО:', 'Недостаточно подтверждающих материалов / требуется повторный выезд');
     if (reason === null) return;
     await run(store.rejectMarkerClose(m.id, reason), 'Заявка на закрытие отклонена. Метка снова в активном поиске.', 'error');
+  };
+
+  const approvePhoto = (p) => run(store.approvePhoto(p.id), 'Фото одобрено и теперь видно на карте.');
+  const rejectPhoto = async (p) => {
+    const reason = window.prompt('Причина отклонения фото (фото будет удалено):', 'Не соответствует правилам размещения');
+    if (reason === null) return;
+    await run(store.rejectPhoto(p.id, reason), 'Фото отклонено и удалено.', 'error');
   };
 
   return (
@@ -167,6 +176,45 @@ export default function AdminView() {
                   </article>
                 );
               })}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === 'photos' && (
+        <>
+          <SectionHeader
+            title="Фотографии меток на проверке"
+            description="Фото к меткам поисково-спасательных операций публикуются только после вашей проверки. Отклонённое фото удаляется без возможности восстановления."
+          >
+            <span className="badge badge-pending">{photoQueue.length} фото</span>
+          </SectionHeader>
+          {photoQueue.length === 0 ? (
+            <EmptyState icon="check" tone="accent" title="Новых фотографий нет">Все загруженные фото проверены.</EmptyState>
+          ) : (
+            <div className="cards-grid cards-grid-wide">
+              {photoQueue.map((p) => (
+                <article key={p.id} className="admin-approval-card" data-testid="photo-queue-item">
+                  <button type="button" className="admin-approval-photo-box" onClick={() => openLightbox([p.url], { title: p.markerTitle })}>
+                    <img loading="lazy" decoding="async" src={p.url} alt={`Фото к метке «${p.markerTitle}»`} className="admin-approval-photo" />
+                    <span className="admin-approval-zoom-hint"><Icon name="search" /> Увеличить фото</span>
+                  </button>
+                  <div className="admin-approval-content">
+                    <h4 className="card-title">{p.markerTitle}</h4>
+                    <ul className="meta-list">
+                      <li><Icon name="user" /> Загрузил: <strong>{p.uploadedByName || 'аккаунт удалён'}</strong></li>
+                    </ul>
+                    <div className="admin-approval-actions">
+                      <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => rejectPhoto(p)}>
+                        <Icon name="cross" /> Отклонить
+                      </button>
+                      <button type="button" className="btn btn-accent btn-sm grow" onClick={() => approvePhoto(p)}>
+                        <Icon name="check" /> Одобрить
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))}
             </div>
           )}
         </>

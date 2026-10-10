@@ -100,6 +100,7 @@ pub struct Viewer {
     pub organization_id: Option<Uuid>,
     pub volonteer_id: Option<Uuid>,
     pub full_name: String,
+    pub email_verified: bool,
     /// Момент истечения сессии (unix-время из JWT).
     pub exp: i64,
 }
@@ -120,8 +121,8 @@ impl Viewer {
 /// Загружает пользователя по токену и сверяет token_version (отзыв сессий).
 pub async fn viewer_from_token(pool: &PgPool, secret: &[u8], token: &str) -> Option<Viewer> {
     let claims = decode_token(secret, token)?;
-    let row: Option<(Uuid, UserRole, Option<Uuid>, Option<Uuid>, String, String, i32)> = sqlx::query_as(
-        "SELECT u.id, u.role, u.organization_id, u.volonteer_id, p.last_name, p.first_name, u.token_version
+    let row: Option<(Uuid, UserRole, Option<Uuid>, Option<Uuid>, String, String, i32, bool)> = sqlx::query_as(
+        "SELECT u.id, u.role, u.organization_id, u.volonteer_id, p.last_name, p.first_name, u.token_version, u.email_verified_at IS NOT NULL
            FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1 AND u.deleted_at IS NULL",
     )
     .bind(claims.sub)
@@ -129,11 +130,11 @@ pub async fn viewer_from_token(pool: &PgPool, secret: &[u8], token: &str) -> Opt
     .await
     .ok()
     .flatten();
-    let (id, role, org, vol, last, first, tv) = row?;
+    let (id, role, org, vol, last, first, tv, verified) = row?;
     if tv != claims.tv {
         return None;
     }
-    Some(Viewer { user_id: id, role, organization_id: org, volonteer_id: vol, full_name: format!("{last} {first}"), exp: claims.exp })
+    Some(Viewer { user_id: id, role, organization_id: org, volonteer_id: vol, full_name: format!("{last} {first}"), email_verified: verified, exp: claims.exp })
 }
 
 // ---------- Ограничитель частоты (окно в памяти) ----------------------------

@@ -94,6 +94,10 @@ type MapMarker {
 	Ссылки вида /media/photos/{id}; сами файлы лежат в PostgreSQL.
 	"""
 	photos: [String!]!
+	"""
+	Фото на проверке у администратора: видны только автору и администраторам.
+	"""
+	pendingPhotos: [String!]!
 	closureProof: ClosureProof
 	createdBy: ID
 	createdByName: String!
@@ -139,6 +143,22 @@ type Mutation {
 	Завершает все сессии пользователя (token_version++), очищает cookie.
 	"""
 	logout: Boolean!
+	"""
+	Письмо со ссылкой для нового пароля. Ответ всегда одинаков — по нему нельзя узнать, зарегистрирован ли адрес.
+	"""
+	requestPasswordReset(email: String!): Boolean!
+	"""
+	Новый пароль по токену из письма (токен одноразовый, живёт 1 час). Все прежние сессии отзываются.
+	"""
+	resetPassword(token: String!, newPassword: String!): Boolean!
+	"""
+	Подтверждение электронной почты по токену из письма.
+	"""
+	verifyEmail(token: String!): Boolean!
+	"""
+	Повторно отправить письмо для подтверждения почты (не чаще раза в минуту).
+	"""
+	resendVerification: Boolean!
 	changePassword(oldPassword: String!, newPassword: String!): Boolean!
 	"""
 	Волонтёр правит свой профиль; передаются только изменяемые поля (пустая строка очищает факультет и номер билета).
@@ -187,6 +207,14 @@ type Mutation {
 	ACTIVE → PENDING_APPROVAL: отчёт с фото о завершении ПСО.
 	"""
 	requestMarkerClose(markerId: ID!, photo: String, note: String!, targetStatus: MapMarkerStatus!): MapMarker!
+	"""
+	Администратор одобряет фото метки: оно становится видно всем.
+	"""
+	approvePhoto(photoId: ID!): MapMarker!
+	"""
+	Администратор отклоняет фото метки: оно удаляется.
+	"""
+	rejectPhoto(photoId: ID!, reason: String): MapMarker!
 	approveMarkerClose(markerId: ID!): MapMarker!
 	rejectMarkerClose(markerId: ID!, reason: String): MapMarker!
 	"""
@@ -211,6 +239,18 @@ type Organization {
 	events: [Event!]!
 }
 
+"""
+Фото в очереди модерации (только администратор).
+"""
+type PhotoModerationItem {
+	id: ID!
+	markerId: ID!
+	markerTitle: String!
+	url: String!
+	uploadedByName: String
+	createdAt: String!
+}
+
 type Query {
 	"""
 	Текущий пользователь (null для гостя).
@@ -224,6 +264,10 @@ type Query {
 	Версия действующей политики обработки персональных данных.
 	"""
 	privacyPolicyVersion: String!
+	"""
+	Настроена ли отправка писем (восстановление пароля, подтверждение почты).
+	"""
+	mailEnabled: Boolean!
 	"""
 	Список учётных записей — только администратор.
 	"""
@@ -249,6 +293,10 @@ type Query {
 	"""
 	reviews(eventId: ID, volonteerId: ID): [EventReview!]!
 	eventReviews(eventId: ID!): [EventReview!]!
+	"""
+	Фото меток, ожидающие проверки (только администратор).
+	"""
+	photoModerationQueue: [PhotoModerationItem!]!
 	mapMarkers(type: MapMarkerType): [MapMarker!]!
 }
 
@@ -309,6 +357,10 @@ type User {
 	Версия политики обработки ПДн, с которой пользователь согласился.
 	"""
 	consentVersion: String
+	"""
+	Подтверждён ли адрес электронной почты (по ссылке из письма).
+	"""
+	emailVerified: Boolean!
 }
 
 enum UserRole {

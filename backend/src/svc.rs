@@ -119,7 +119,140 @@ fn rate_limit(ctx: &Context<'_>, key: &'static str, limit: u32) -> AppResult<()>
 }
 
 /// Версия политики обработки персональных данных (docs/PRIVACY.md). Меняется при изменении политики.
-pub const PRIVACY_POLICY_VERSION: &str = "2026-10-09";
+pub const PRIVACY_POLICY_VERSION: &str = "2026-10-10";
+
+// ---------- Письма: подтверждение почты и восстановление пароля ------------------------------------------
+const VERIFY_TTL_HOURS: i32 = 72;
+const RESET_TTL_MINUTES: i32 = 60;
+/// Не чаще одного письма одного вида на пользователя в это время (защита от рассылки спама на чужой адрес).
+const MAIL_COOLDOWN_SECONDS: i32 = 60;
+
+fn hash_token(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+/// Создаёт одноразовую ссылку. Прежние неиспользованные токены того же вида аннулируются.
+/// Возвращает None, если письмо такого вида уже отправляли только что.
+async fn issue_email_token(conn: &mut PgConnection, user_id: Uuid, purpose: &str, email: &str, ttl_minutes: i32) -> AppResult<Option<String>> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use rand::RngCore;
+    let recent: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM email_tokens WHERE user_id = $1 AND purpose = $2::email_token_purpose AND created_at > now() - make_interval(secs => $3))",
+    ).bind(user_id).bind(purpose).bind(MAIL_COOLDOWN_SECONDS).fetch_one(&mut *conn).await?;
+    if recent { return Ok(None); }
+    sqlx::query("DELETE FROM email_tokens WHERE (user_id = $1 AND purpose = $2::email_token_purpose AND used_at IS NULL) OR expires_at < now() - interval '1 day'")
+        .bind(user_id).bind(purpose).execute(&mut *conn).await?;
+    let mut raw = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut raw);
+    let token = URL_SAFE_NO_PAD.encode(raw);
+    sqlx::query("INSERT INTO email_tokens (user_id, purpose, token_hash, sent_to, expires_at) VALUES ($1, $2::email_token_purpose, $3, $4, now() + make_interval(mins => $5))")
+        .bind(user_id).bind(purpose).bind(hash_token(&token)).bind(email).bind(ttl_minutes).execute(&mut *conn).await?;
+    Ok(Some(token))
+}
+
+/// Письмо со ссылкой подтверждения. Ошибки отправки не должны ломать основное действие.
+async fn send_verification(ctx: &Context<'_>, user_id: Uuid) {
+    let s = st(ctx);
+    if !s.mailer.enabled() { return; }
+    let res: AppResult<()> = async {
+        let (email, name): (String, String) = sqlx::query_as("SELECT u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1 AND u.deleted_at IS NULL AND u.email_verified_at IS NULL")
+            .bind(user_id).fetch_one(&s.pool).await?;
+        let mut conn = s.pool.acquire().await?;
+        if let Some(token) = issue_email_token(&mut conn, user_id, "VERIFY_EMAIL", &email, VERIFY_TTL_HOURS * 60).await? {
+            let link = format!("{}/?verify={token}", s.cfg.public_url);
+            s.mailer.send(crate::mail::verification_mail(&email, &name, &link));
+        }
+        Ok(())
+    }.await;
+    if res.is_err() { tracing::warn!("не удалось подготовить письмо подтверждения"); }
+}
+
+/// Мутации, создающие контент, при REQUIRE_VERIFIED_EMAIL доступны только с подтверждённой почтой.
+fn need_verified(ctx: &Context<'_>, v: &Viewer) -> AppResult<()> {
+    if st(ctx).cfg.require_verified_email && !v.email_verified {
+        return Err(AppError::EmailNotVerified);
+    }
+    Ok(())
+}
+
+pub async fn request_password_reset(ctx: &Context<'_>, email: &str) -> AppResult<bool> {
+    rate_limit(ctx, "reset", 5)?;
+    let s = st(ctx);
+    if !s.mailer.enabled() {
+        return Err(AppError::validation("Восстановление пароля недоступно: почтовый сервис не настроен. Обратитесь к администратору."));
+    }
+    let email = email.trim().to_lowercase();
+    // Ответ одинаков для существующих и несуществующих адресов — перебором узнать, кто зарегистрирован, нельзя.
+    let row: Option<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT u.id, u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE lower(u.email) = $1 AND u.deleted_at IS NULL",
+    ).bind(&email).fetch_optional(&s.pool).await?;
+    if let Some((id, addr, name)) = row {
+        let mut tx = s.pool.begin().await?;
+        if let Some(token) = issue_email_token(&mut tx, id, "RESET_PASSWORD", &addr, RESET_TTL_MINUTES).await? {
+            audit(&mut tx, None, "auth.reset_requested", "user", Some(id), json!({})).await?;
+            tx.commit().await?;
+            let link = format!("{}/?reset={token}", s.cfg.public_url);
+            s.mailer.send(crate::mail::reset_mail(&addr, &name, &link));
+        }
+    }
+    Ok(true)
+}
+
+const BAD_LINK: &str = "Ссылка недействительна или устарела. Запросите новое письмо.";
+
+pub async fn reset_password(ctx: &Context<'_>, token: &str, new_password: &str) -> AppResult<bool> {
+    rate_limit(ctx, "reset_confirm", 10)?;
+    let pool = &st(ctx).pool;
+    let mut tx = pool.begin().await?;
+    let row: Option<(Uuid, Uuid, String)> = sqlx::query_as(
+        "SELECT t.id, u.id, u.email FROM email_tokens t JOIN users u ON u.id = t.user_id
+          WHERE t.token_hash = $1 AND t.purpose = 'RESET_PASSWORD' AND t.used_at IS NULL AND t.expires_at > now()
+            AND u.deleted_at IS NULL AND lower(u.email) = lower(t.sent_to)
+          FOR UPDATE OF t",
+    ).bind(hash_token(token.trim())).fetch_optional(&mut *tx).await?;
+    let (token_id, user_id, email) = row.ok_or_else(|| AppError::validation(BAD_LINK))?;
+    // пароль проверяется до погашения токена: слабый пароль не «сжигает» ссылку
+    auth::validate_password(new_password, &email)?;
+    let n = new_password.to_string();
+    let hash = tokio::task::spawn_blocking(move || auth::hash_password(&n)).await.map_err(|e| anyhow::anyhow!("join: {e}"))??;
+    // переход по ссылке из письма заодно подтверждает владение адресом; старые сессии отзываются
+    sqlx::query("UPDATE users SET password_hash = $2, token_version = token_version + 1, failed_logins = 0, locked_until = NULL, email_verified_at = COALESCE(email_verified_at, now()) WHERE id = $1")
+        .bind(user_id).bind(hash).execute(&mut *tx).await?;
+    sqlx::query("UPDATE email_tokens SET used_at = now() WHERE id = $1").bind(token_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM email_tokens WHERE user_id = $1 AND purpose = 'RESET_PASSWORD' AND used_at IS NULL").bind(user_id).execute(&mut *tx).await?;
+    audit(&mut tx, None, "auth.password_reset", "user", Some(user_id), json!({})).await?;
+    tx.commit().await?;
+    Ok(true)
+}
+
+pub async fn verify_email(ctx: &Context<'_>, token: &str) -> AppResult<bool> {
+    rate_limit(ctx, "verify", 20)?;
+    let mut tx = st(ctx).pool.begin().await?;
+    let row: Option<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT t.id, u.id FROM email_tokens t JOIN users u ON u.id = t.user_id
+          WHERE t.token_hash = $1 AND t.purpose = 'VERIFY_EMAIL' AND t.used_at IS NULL AND t.expires_at > now()
+            AND u.deleted_at IS NULL AND lower(u.email) = lower(t.sent_to)
+          FOR UPDATE OF t",
+    ).bind(hash_token(token.trim())).fetch_optional(&mut *tx).await?;
+    let (token_id, user_id) = row.ok_or_else(|| AppError::validation(BAD_LINK))?;
+    sqlx::query("UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()) WHERE id = $1").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE email_tokens SET used_at = now() WHERE id = $1").bind(token_id).execute(&mut *tx).await?;
+    audit(&mut tx, None, "auth.email_verified", "user", Some(user_id), json!({})).await?;
+    tx.commit().await?;
+    Ok(true)
+}
+
+pub async fn resend_verification(ctx: &Context<'_>) -> AppResult<bool> {
+    rate_limit(ctx, "resend", 5)?;
+    let v = need(ctx)?;
+    if !st(ctx).mailer.enabled() {
+        return Err(AppError::validation("Почтовый сервис не настроен. Обратитесь к администратору."));
+    }
+    if v.email_verified { return Ok(true); }
+    send_verification(ctx, v.user_id).await;
+    Ok(true)
+}
 
 const MAX_FAILED: i16 = 5;
 const LOCK_MINUTES: i64 = 15;
@@ -229,6 +362,7 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
         })?;
     audit(&mut tx, None, "auth.register", "user", Some(user_id), json!({"role": role, "consent": PRIVACY_POLICY_VERSION})).await?;
     tx.commit().await?;
+    send_verification(ctx, user_id).await;
 
     let (token, expires_at) = start_session(ctx, user_id, 0)?;
     Ok(AuthPayload { token: client(ctx).want_token.then_some(token), user: user_by_id(pool, user_id).await?, expires_at })
@@ -442,6 +576,7 @@ pub async fn event_by_id(ctx: &Context<'_>, id: Uuid) -> AppResult<Event> {
 pub async fn create_event(ctx: &Context<'_>, title: &str, description: &str, location: &str, start: &str, end: &str, required: i32, hours: f64, org: Uuid) -> AppResult<Event> {
     let v = need(ctx)?;
     if !v.can_act_for_org(org) { return Err(AppError::Forbidden); }
+    need_verified(ctx, v)?;
     let title = clean(title, "Название события", 3, 200)?;
     let description = clean(description, "Описание", 1, 4000)?;
     let location = clean(location, "Место проведения", 1, 300)?;
@@ -540,6 +675,7 @@ pub async fn request_by_id(ctx: &Context<'_>, id: Uuid) -> AppResult<Option<Volo
 pub async fn submit_request(ctx: &Context<'_>, vol: Uuid, event: Uuid, description: Option<String>) -> AppResult<VolonteerEventRequest> {
     let v = need(ctx)?;
     if !v.can_act_for_volonteer(vol) { return Err(AppError::Forbidden); }
+    need_verified(ctx, v)?;
     let description = clean_opt(&description, "Комментарий", 1000)?;
     let mut tx = st(ctx).pool.begin().await?;
     let hours: Option<f64> = sqlx::query_scalar("SELECT planned_hours::float8 FROM events WHERE id = $1").bind(event).fetch_optional(&mut *tx).await?;
@@ -703,9 +839,16 @@ fn photos_visible(ctx: &Context<'_>) -> bool { viewer(ctx).is_some() || st(ctx).
 async fn assemble_markers(ctx: &Context<'_>, rows: Vec<MarkerRow>) -> AppResult<Vec<MapMarker>> {
     let pool = &st(ctx).pool;
     let ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+    // Одобренные фото видят все, кому разрешён просмотр; фото на проверке — только автор и администратор.
     let photos: Vec<(Uuid, Uuid)> = if photos_visible(ctx) {
-        sqlx::query_as("SELECT marker_id, id FROM photos WHERE purpose = 'MARKER' AND marker_id = ANY($1) ORDER BY marker_id, position").bind(&ids).fetch_all(pool).await?
+        sqlx::query_as("SELECT marker_id, id FROM photos WHERE purpose = 'MARKER' AND status = 'APPROVED' AND marker_id = ANY($1) ORDER BY marker_id, position").bind(&ids).fetch_all(pool).await?
     } else { vec![] };
+    let pending: Vec<(Uuid, Uuid)> = match viewer(ctx) {
+        Some(v) => sqlx::query_as(
+            "SELECT marker_id, id FROM photos WHERE purpose = 'MARKER' AND status = 'PENDING' AND marker_id = ANY($1) AND ($2 OR uploaded_by = $3) ORDER BY marker_id, position",
+        ).bind(&ids).bind(v.is_admin()).bind(v.user_id).fetch_all(pool).await?,
+        None => vec![],
+    };
     let closures: Vec<ClosureRow> = if viewer(ctx).is_some() {
         sqlx::query_as(
             "SELECT DISTINCT ON (marker_id) marker_id, photo_id, note, target_status, submitted_by, submitted_by_name, submitted_at, approved_at, approved_by, rejected_at, reject_reason
@@ -719,6 +862,7 @@ async fn assemble_markers(ctx: &Context<'_>, rows: Vec<MarkerRow>) -> AppResult<
             id: gid(r.id), kind: r.kind, status: r.status, title: r.title, description: r.description, lat: r.lat, lng: r.lng,
             urgency: r.urgency, contact_phone: r.contact_phone, last_seen_date: opt_date(r.last_seen_date), last_seen_location: r.last_seen_location,
             photos: photos.iter().filter(|(m, _)| *m == r.id).map(|(_, p)| photo_url(*p)).collect(),
+            pending_photos: pending.iter().filter(|(m, _)| *m == r.id).map(|(_, p)| photo_url(*p)).collect(),
             closure_proof: proof, created_by: r.created_by.map(gid), created_by_name: r.created_by_name, created_at: rfc3339(r.created_at),
         }
     }).collect())
@@ -745,6 +889,7 @@ async fn marker_one(ctx: &Context<'_>, id: Uuid) -> AppResult<MapMarker> {
 
 pub async fn create_marker(ctx: &Context<'_>, input: MapMarkerInput) -> AppResult<MapMarker> {
     let v = need(ctx)?;
+    need_verified(ctx, v)?;
     let title = clean(&input.title, "Заголовок", 3, 200)?;
     let description = clean(&input.description, "Описание", 1, 4000)?;
     let lat = finite(input.lat, "Широта")?;
@@ -768,12 +913,15 @@ pub async fn create_marker(ctx: &Context<'_>, input: MapMarkerInput) -> AppResul
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
     ).bind(input.kind).bind(&title).bind(&description).bind(lat).bind(lng).bind(input.urgency).bind(&phone).bind(seen_date).bind(&seen_loc)
         .bind(v.user_id).bind(&v.full_name).fetch_one(&mut *tx).await?;
+    // Предварительная модерация: фото администратора публикуются сразу, остальные ждут проверки
+    let status = if v.is_admin() { "APPROVED" } else { "PENDING" };
     for (i, p) in photos.iter().enumerate() {
-        sqlx::query("INSERT INTO photos (marker_id, purpose, position, content_type, data, size_bytes, sha256, uploaded_by) VALUES ($1,'MARKER',$2,$3,$4,$5,$6,$7)")
-            .bind(id).bind(i as i16).bind(p.content_type).bind(&p.bytes).bind(p.bytes.len() as i32).bind(&p.sha256).bind(v.user_id)
+        sqlx::query("INSERT INTO photos (marker_id, purpose, position, content_type, data, size_bytes, sha256, uploaded_by, status, moderated_by, moderated_at)
+                     VALUES ($1,'MARKER',$2,$3,$4,$5,$6,$7,$8::photo_status, CASE WHEN $8 = 'APPROVED' THEN $7 END, CASE WHEN $8 = 'APPROVED' THEN now() END)")
+            .bind(id).bind(i as i16).bind(p.content_type).bind(&p.bytes).bind(p.bytes.len() as i32).bind(&p.sha256).bind(v.user_id).bind(status)
             .execute(&mut *tx).await?;
     }
-    audit(&mut tx, Some(v), "marker.create", "marker", Some(id), json!({"type": input.kind, "photos": photos.len()})).await?;
+    audit(&mut tx, Some(v), "marker.create", "marker", Some(id), json!({"type": input.kind, "photos": photos.len(), "photos_status": status})).await?;
     tx.commit().await?;
     marker_one(ctx, id).await
 }
@@ -808,6 +956,47 @@ pub async fn request_marker_close(ctx: &Context<'_>, id: Uuid, photo: Option<Str
     marker_one(ctx, id).await
 }
 
+// ---------- Модерация фото ----------------------------------------------------------------------------------
+pub async fn photo_moderation_queue(ctx: &Context<'_>) -> AppResult<Vec<PhotoModerationItem>> {
+    let v = need(ctx)?;
+    if !v.is_admin() { return Err(AppError::Forbidden); }
+    let rows: Vec<(Uuid, Uuid, String, Option<String>, chrono::DateTime<Utc>)> = sqlx::query_as(
+        "SELECT p.id, p.marker_id, m.title, pe.last_name || ' ' || pe.first_name, p.created_at
+           FROM photos p JOIN map_markers m ON m.id = p.marker_id LEFT JOIN users u ON u.id = p.uploaded_by LEFT JOIN persons pe ON pe.id = u.person_id
+          WHERE p.status = 'PENDING' AND p.purpose = 'MARKER' ORDER BY p.created_at",
+    ).fetch_all(&st(ctx).pool).await?;
+    Ok(rows.into_iter().map(|(id, marker, title, by, at)| PhotoModerationItem {
+        id: gid(id), marker_id: gid(marker), marker_title: title, url: photo_url(id), uploaded_by_name: by, created_at: rfc3339(at),
+    }).collect())
+}
+
+pub async fn approve_photo(ctx: &Context<'_>, id: Uuid) -> AppResult<MapMarker> {
+    let v = need(ctx)?;
+    if !v.is_admin() { return Err(AppError::Forbidden); }
+    let mut tx = st(ctx).pool.begin().await?;
+    let marker: Option<Uuid> = sqlx::query_scalar(
+        "UPDATE photos SET status = 'APPROVED', moderated_by = $2, moderated_at = now() WHERE id = $1 AND status = 'PENDING' AND purpose = 'MARKER' RETURNING marker_id",
+    ).bind(id).bind(v.user_id).fetch_optional(&mut *tx).await?;
+    let marker = marker.ok_or_else(|| AppError::conflict("Фото не ожидает проверки"))?;
+    audit(&mut tx, Some(v), "photo.approve", "photo", Some(id), json!({"marker": marker})).await?;
+    tx.commit().await?;
+    marker_one(ctx, marker).await
+}
+
+/// Отклонённое фото удаляется целиком; причина остаётся только в журнале аудита.
+pub async fn reject_photo(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -> AppResult<MapMarker> {
+    let v = need(ctx)?;
+    if !v.is_admin() { return Err(AppError::Forbidden); }
+    let reason = clean_opt(&reason, "Причина", 500)?.unwrap_or_else(|| "Не соответствует правилам".into());
+    let mut tx = st(ctx).pool.begin().await?;
+    let marker: Option<Uuid> = sqlx::query_scalar("DELETE FROM photos WHERE id = $1 AND status = 'PENDING' AND purpose = 'MARKER' RETURNING marker_id")
+        .bind(id).fetch_optional(&mut *tx).await?;
+    let marker = marker.ok_or_else(|| AppError::conflict("Фото не ожидает проверки"))?;
+    audit(&mut tx, Some(v), "photo.reject", "photo", Some(id), json!({"marker": marker, "reason": reason})).await?;
+    tx.commit().await?;
+    marker_one(ctx, marker).await
+}
+
 pub async fn approve_marker_close(ctx: &Context<'_>, id: Uuid) -> AppResult<MapMarker> {
     let v = need(ctx)?;
     if !v.is_admin() { return Err(AppError::Forbidden); }
@@ -837,7 +1026,7 @@ async fn remove_search_marker(conn: &mut PgConnection, id: Uuid, final_status: M
     Ok(MapMarker {
         id: gid(r.id), kind: r.kind, status: final_status, title: r.title, description: r.description, lat: r.lat, lng: r.lng,
         urgency: r.urgency, contact_phone: None, last_seen_date: None, last_seen_location: None,
-        photos: vec![], closure_proof: None, created_by: None, created_by_name: String::new(), created_at: rfc3339(r.created_at),
+        photos: vec![], pending_photos: vec![], closure_proof: None, created_by: None, created_by_name: String::new(), created_at: rfc3339(r.created_at),
     })
 }
 
@@ -995,6 +1184,7 @@ pub async fn delete_my_account(ctx: &Context<'_>, password: &str) -> AppResult<b
     sqlx::query("UPDATE marker_closures SET submitted_by_name = $2 WHERE submitted_by = $1").bind(v.user_id).bind(&tombstone).execute(&mut *tx).await?;
     sqlx::query("UPDATE users SET email = 'deleted-' || id::text || '@deleted.invalid', password_hash = '!', token_version = token_version + 1,
                         failed_logins = 0, locked_until = NULL, deleted_at = now() WHERE id = $1").bind(v.user_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM email_tokens WHERE user_id = $1").bind(v.user_id).execute(&mut *tx).await?;
     audit(&mut tx, Some(v), "account.delete", "user", Some(v.user_id), json!({})).await?;
     tx.commit().await?;
     set_cookie(ctx, auth::clear_cookie(st(ctx).cfg.cookie_secure));

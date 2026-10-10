@@ -23,7 +23,7 @@ query Hydrate {
   }
   reviews { id eventId volonteerId authorName rating text createdAt updatedAt }
   mapMarkers {
-    id type status title description lat lng urgency contactPhone lastSeenDate lastSeenLocation photos
+    id type status title description lat lng urgency contactPhone lastSeenDate lastSeenLocation photos pendingPhotos
     closureProof { photo note targetStatus submittedBy submittedByName submittedAt approvedAt approvedBy rejectedAt rejectReason }
     createdBy createdByName createdAt
   }
@@ -102,10 +102,25 @@ query VolonteerStatement($v: ID!, $s: String!, $e: String!) {
 # ---------- Карта --------------------------------------------------------------
 # photos — data URL (JPEG/PNG/WebP), до 5 штук, только для SEARCH_RESCUE. Сервер перекодирует их в JPEG,
 # удалит EXIF и сохранит в PostgreSQL; клиент получит ссылки вида /media/photos/{id}.
-mutation CreateMapMarker($input: MapMarkerInput!) { createMapMarker(input: $input) { id title lat lng photos } }
+# Фото администратора публикуются сразу (photos), остальные ждут проверки (pendingPhotos: видны автору и администраторам).
+mutation CreateMapMarker($input: MapMarkerInput!) { createMapMarker(input: $input) { id title lat lng photos pendingPhotos } }
+# Очередь модерации фото — только администратор
+query PhotoModerationQueue { photoModerationQueue { id markerId markerTitle url uploadedByName createdAt } }
+mutation ApprovePhoto($photoId: ID!) { approvePhoto(photoId: $photoId) { id photos pendingPhotos } }
+# Отклонённое фото удаляется; причина остаётся в журнале аудита
+mutation RejectPhoto($photoId: ID!, $reason: String) { rejectPhoto(photoId: $photoId, reason: $reason) { id photos pendingPhotos } }
 # ACTIVE → PENDING_APPROVAL (фото обязательно)
 mutation RequestMarkerClose($markerId: ID!, $photo: String, $note: String!, $targetStatus: MapMarkerStatus!) {
   requestMarkerClose(markerId: $markerId, photo: $photo, note: $note, targetStatus: $targetStatus) { id status }
 }
 mutation CloseMapMarker($markerId: ID!) { closeMapMarker(markerId: $markerId) { id status } }
 mutation DeleteMapMarker($markerId: ID!) { deleteMapMarker(markerId: $markerId) }
+
+# ---------- Почта: подтверждение адреса и восстановление пароля ----------------------
+# Ответ requestPasswordReset не зависит от того, есть ли такой адрес в системе.
+# Ссылки в письмах: {PUBLIC_URL}/?verify=токен и {PUBLIC_URL}/?reset=токен (токен одноразовый).
+query MailEnabled { mailEnabled }
+mutation RequestPasswordReset($email: String!) { requestPasswordReset(email: $email) }
+mutation ResetPassword($token: String!, $password: String!) { resetPassword(token: $token, newPassword: $password) }
+mutation VerifyEmail($token: String!) { verifyEmail(token: $token) }
+mutation ResendVerification { resendVerification }

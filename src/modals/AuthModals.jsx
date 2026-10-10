@@ -49,6 +49,9 @@ export function LoginModal({ onClose, onAuthenticated }) {
       <Field label="Пароль" required>
         <input type="password" className="form-input" required autoComplete="current-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
       </Field>
+      {store.isMailEnabled() && (
+        <button type="button" className="btn btn-link" data-testid="forgot-password" onClick={() => openModal('forgotPassword')}>Забыли пароль?</button>
+      )}
       {SHOW_DEMO && (
       <div className="demo-login-box">
         <p>Демо-профили для проверки:</p>

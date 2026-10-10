@@ -275,6 +275,14 @@ code { font-size: 0.85em; background: var(--slate-100); padding: 1px 6px; border
 .hero-stat-item .stat-caption { font-size: 0.78rem; color: #a5b4cf; font-weight: 600; }
 
 /* ---------- Баннер рабочего места ---------- */
+.verify-banner {
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  background: var(--warning-light); color: #78350f;
+  border: 1px solid var(--warning); border-radius: var(--radius-lg);
+  padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.9rem;
+}
+.verify-banner svg { width: 1.2rem; height: 1.2rem; flex: none; }
+.verify-banner span { flex: 1 1 18rem; }
 .context-banner {
   background: linear-gradient(135deg, #1e293b, #0f172a);
   color: #fff;

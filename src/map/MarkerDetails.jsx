@@ -14,6 +14,7 @@ export default function MarkerDetails({ marker, onAfterAction }) {
   const urgency = URGENCY[marker.urgency] || URGENCY.LOW;
   const isRescue = marker.type === 'SEARCH_RESCUE';
   const photos = marker.photos || [];
+  const pendingPhotos = marker.pendingPhotos || [];
   const proof = marker.closureProof;
 
   const requireAuth = () => {
@@ -60,6 +61,13 @@ export default function MarkerDetails({ marker, onAfterAction }) {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {pendingPhotos.length > 0 && (
+        <div className="popup-last-seen" data-testid="pending-photos">
+          <Icon name="clock" /> Фото на проверке у администратора: {pendingPhotos.length}.
+          Остальным посетителям они станут видны после одобрения.
         </div>
       )}
 

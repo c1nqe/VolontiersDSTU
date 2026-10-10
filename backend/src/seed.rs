@@ -84,7 +84,7 @@ pub async fn run(pool: &PgPool, reset: bool) -> Result<()> {
         let pw = u.password.clone();
         let hash = tokio::task::spawn_blocking(move || auth::hash_password(&pw)).await??;
         let role: &str = &u.role;
-        sqlx::query("INSERT INTO users (id, person_id, email, password_hash, role, organization_id, volonteer_id, created_at, consent_version, consent_at) VALUES ($1,$2,$3,$4,$5::user_role,$6,$7,$8,$9,now())")
+        sqlx::query("INSERT INTO users (id, person_id, email, password_hash, role, organization_id, volonteer_id, created_at, consent_version, consent_at, email_verified_at) VALUES ($1,$2,$3,$4,$5::user_role,$6,$7,$8,$9,now(),now())")
             .bind(id(&u.key)).bind(pid).bind(&u.email).bind(hash).bind(role)
             .bind(u.org.as_deref().map(id)).bind(u.vol.as_deref().map(id)).bind(ts(&u.created_at)?).bind(crate::svc::PRIVACY_POLICY_VERSION).execute(&mut *tx).await?;
     }
@@ -175,7 +175,7 @@ pub async fn create_admin(pool: &PgPool, email: &str, last: &str, first: &str, p
     let hash = tokio::task::spawn_blocking(move || auth::hash_password(&pw)).await??;
     let mut tx = pool.begin().await?;
     let pid: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name) VALUES ($1,$2) RETURNING id").bind(first).bind(last).fetch_one(&mut *tx).await?;
-    let uid: Uuid = sqlx::query_scalar("INSERT INTO users (person_id, email, password_hash, role, consent_version, consent_at) VALUES ($1,$2,$3,'ADMIN',$4,now()) RETURNING id")
+    let uid: Uuid = sqlx::query_scalar("INSERT INTO users (person_id, email, password_hash, role, consent_version, consent_at, email_verified_at) VALUES ($1,$2,$3,'ADMIN',$4,now(),now()) RETURNING id")
         .bind(pid).bind(&email).bind(hash).bind(crate::svc::PRIVACY_POLICY_VERSION).fetch_one(&mut *tx).await.context("не удалось создать администратора (email занят?)")?;
     sqlx::query("INSERT INTO audit_log (actor_role, action, entity, entity_id) VALUES ('ADMIN', 'admin.created_via_cli', 'user', $1)").bind(uid).execute(&mut *tx).await?;
     tx.commit().await?;

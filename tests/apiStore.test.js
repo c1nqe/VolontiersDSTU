@@ -149,6 +149,73 @@ describe('ApiStore: мутации идут на сервер', () => {
   });
 });
 
+describe('ApiStore: модерация фото', () => {
+  it('очередь загружается только администратору', async () => {
+    const queue = [{ id: 'ph1', markerId: 'm1', markerTitle: 'Поиск', url: '/media/photos/ph1', uploadedByName: 'Иванов Алексей' }];
+    const client = fakeClient({ photoModerationQueue: () => ({ photoModerationQueue: queue }) });
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    expect(store.getPhotoQueue()).toEqual([]);
+    expect(client.calls.some((c) => c.query.includes('photoModerationQueue'))).toBe(false);
+
+    const adminClient = vi.fn(async (query) => {
+      if (query === HYDRATE_QUERY) return { ...structuredClone(SNAPSHOT), me: { ...SNAPSHOT.me, role: 'ADMIN' } };
+      if (query.includes('photoModerationQueue')) return { photoModerationQueue: queue };
+      return {};
+    });
+    const admin = new ApiStore({ client: adminClient, storage: memoryStorage() });
+    await admin.init();
+    expect(admin.getPhotoQueue()).toEqual(queue);
+  });
+
+  it('очередь, недоступная по ошибке, не ломает загрузку', async () => {
+    const adminClient = vi.fn(async (query) => {
+      if (query === HYDRATE_QUERY) return { ...structuredClone(SNAPSHOT), me: { ...SNAPSHOT.me, role: 'ADMIN' } };
+      throw new Error('boom');
+    });
+    const admin = new ApiStore({ client: adminClient, storage: memoryStorage() });
+    expect(await admin.init()).toBe(true);
+    expect(admin.getPhotoQueue()).toEqual([]);
+  });
+
+  it('одобрение и отклонение отправляют нужные мутации', async () => {
+    const client = fakeClient();
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    await store.approvePhoto('ph1');
+    await store.rejectPhoto('ph2', 'Лицо ребёнка');
+    expect(client.calls.find((c) => c.query.includes('approvePhoto')).variables).toEqual({ photoId: 'ph1' });
+    expect(client.calls.find((c) => c.query.includes('rejectPhoto')).variables).toEqual({ photoId: 'ph2', reason: 'Лицо ребёнка' });
+  });
+});
+
+describe('ApiStore: почта и восстановление пароля', () => {
+  it('флаг mailEnabled приходит с сервера', async () => {
+    const off = new ApiStore({ client: fakeClient(), storage: memoryStorage() });
+    await off.init();
+    expect(off.isMailEnabled()).toBe(false);
+    const client = vi.fn(async (q) => (q === HYDRATE_QUERY ? { ...structuredClone(SNAPSHOT), mailEnabled: true } : {}));
+    const on = new ApiStore({ client, storage: memoryStorage() });
+    await on.init();
+    expect(on.isMailEnabled()).toBe(true);
+  });
+
+  it('отправляет запросы с нужными переменными', async () => {
+    const client = fakeClient();
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    await store.requestPasswordReset('  a@b.ru ');
+    await store.resetPassword('tok', 'Str0ng-pass');
+    await store.verifyEmail('tok2');
+    await store.resendVerification();
+    const sent = (name) => client.calls.find((c) => c.query.includes(name))?.variables;
+    expect(sent('requestPasswordReset')).toEqual({ email: 'a@b.ru' });
+    expect(sent('resetPassword')).toEqual({ token: 'tok', password: 'Str0ng-pass' });
+    expect(sent('verifyEmail')).toEqual({ token: 'tok2' });
+    expect(client.calls.some((c) => c.query.includes('resendVerification'))).toBe(true);
+  });
+});
+
 describe('ApiStore: отмена, регистрация и персональные данные', () => {
   it('отмена события уходит на сервер вместе с причиной', async () => {
     const client = fakeClient({ cancelEvent: () => ({ cancelEvent: { id: 'e2', status: 'CANCELLED', cancelReason: 'Погода' } }) });

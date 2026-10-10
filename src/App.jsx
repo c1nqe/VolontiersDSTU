@@ -4,6 +4,7 @@ import PhotoLightbox from './components/PhotoLightbox.jsx';
 import { useUI } from './components/UIContext.jsx';
 import { useStore } from './store/StoreContext.jsx';
 import ContextBanner from './views/ContextBanner.jsx';
+import EmailVerificationBanner from './components/EmailVerificationBanner.jsx';
 import PublicView from './views/PublicView.jsx';
 import ModalRoot from './modals/ModalRoot.jsx';
 import PageLoader from './components/PageLoader.jsx';
@@ -36,12 +37,45 @@ function isAllowed(user, view) {
   return getNavItems(user).some((item) => item.view === view);
 }
 
+/**
+ * Ссылки из писем: /?reset=токен и /?verify=токен. Токен забираем из адресной строки сразу
+ * и стираем его из истории, чтобы он не остался в адресе, закладках и заголовке Referer.
+ */
+function takeUrlTokens() {
+  try {
+    const url = new URL(window.location.href);
+    const found = { reset: url.searchParams.get('reset'), verify: url.searchParams.get('verify') };
+    if (found.reset || found.verify) {
+      url.searchParams.delete('reset');
+      url.searchParams.delete('verify');
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+    return found;
+  } catch {
+    return { reset: null, verify: null };
+  }
+}
+
 export default function App() {
   const store = useStore();
   const { showToast, openModal } = useUI();
   const user = store.getCurrentUser();
 
   const [view, setViewState] = useState('PUBLIC');
+  const [urlTokens] = useState(takeUrlTokens);
+
+  // Переход по ссылке из письма: подтверждение почты или форма нового пароля
+  const tokensHandled = useRef(false);
+  useEffect(() => {
+    if (store.status !== 'ready' || tokensHandled.current) return;
+    tokensHandled.current = true;
+    if (urlTokens.reset) openModal('resetPassword', { token: urlTokens.reset });
+    if (urlTokens.verify) {
+      store.verifyEmail(urlTokens.verify).then((res) => {
+        showToast(res.success ? 'Адрес электронной почты подтверждён.' : res.message, res.success ? 'success' : 'error');
+      });
+    }
+  }, [store, store.status, urlTokens, openModal, showToast]);
 
   // Когда сервер ответил в первый раз, возвращаем пользователя в раздел, где он был (если он ему доступен)
   const restored = useRef(false);
@@ -93,6 +127,7 @@ export default function App() {
           <PageLoader />
         ) : (
           <>
+            <EmailVerificationBanner />
             {view !== 'PUBLIC' && <ContextBanner view={view} />}
             <Suspense fallback={<PageLoader />}>
               <View />
@@ -103,7 +138,7 @@ export default function App() {
       <footer className="app-footer no-print">
         <div className="footer-inner">
           <span>Волонтёрский центр ДГТУ «Горящие сердца»</span>
-          <span>Хакатон ВЕСНА '25. Данные хранятся на сервере в PostgreSQL</span>
+          <span>Данные хранятся на сервере в PostgreSQL</span>
         </div>
       </footer>
       <ModalRoot onAuthenticated={(role) => navigate(role)} onLogout={logout} />

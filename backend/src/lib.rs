@@ -4,6 +4,7 @@ pub mod auth;
 pub mod config;
 pub mod error;
 pub mod graphql;
+pub mod mail;
 pub mod media;
 pub mod model;
 pub mod seed;

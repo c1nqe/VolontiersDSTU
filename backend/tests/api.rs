@@ -10,17 +10,20 @@ use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use sqlx::{postgres::PgPoolOptions, Connection, PgConnection, PgPool};
 use tower::ServiceExt;
-use volontiers_server::{app, auth::RateLimiter, config::Config, seed, MIGRATOR};
+use volontiers_server::{app, auth::RateLimiter, config::Config, mail::Mailer, seed, MIGRATOR};
 
 struct Env {
     app: Router,
     pool: PgPool,
     admin_url: String,
     db: String,
+    mailer: Arc<Mailer>,
 }
 
 impl Env {
-    async fn new() -> Env {
+    async fn new() -> Env { Env::with(|_| {}).await }
+
+    async fn with(tweak: impl FnOnce(&mut Config)) -> Env {
         let admin_url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL (…/postgres) не задана");
         let db = format!("vt_{}", uuid::Uuid::new_v4().simple());
         let mut c = PgConnection::connect(&admin_url).await.unwrap();
@@ -29,9 +32,11 @@ impl Env {
         let pool = PgPoolOptions::new().max_connections(5).connect(&url).await.unwrap();
         MIGRATOR.run(&pool).await.unwrap();
         seed::run(&pool, false).await.unwrap();
-        let cfg = Config::for_tests(url);
-        let state = app::AppState { pool: pool.clone(), cfg: Arc::new(cfg), limiter: Arc::new(RateLimiter::new()) };
-        Env { app: app::router(state), pool, admin_url, db }
+        let mut cfg = Config::for_tests(url);
+        tweak(&mut cfg);
+        let mailer = Arc::new(Mailer::outbox());
+        let state = app::AppState { pool: pool.clone(), cfg: Arc::new(cfg), limiter: Arc::new(RateLimiter::new()), mailer: mailer.clone() };
+        Env { app: app::router(state), pool, admin_url, db, mailer }
     }
 
     async fn call(&self, cookie: Option<&str>, origin: Option<&str>, query: &str, vars: Value, extra: &[(&str, &str)]) -> (StatusCode, Value, Vec<String>) {
@@ -338,7 +343,7 @@ async fn database_enforces_state_machine_and_audit() {
 async fn photos_pipeline_and_access() {
     let env = Env::new().await;
     let v = env.volunteer().await;
-    let mk = "mutation($i:MapMarkerInput!){createMapMarker(input:$i){id status photos createdByName}}";
+    let mk = "mutation($i:MapMarkerInput!){createMapMarker(input:$i){id status photos pendingPhotos createdByName}}";
     let base = |ty: &str, photos: Vec<String>| json!({"i": {"type": ty, "title": "Поиск: Тестов Т.Т.", "description": "Описание", "lat": 47.23, "lng": 39.71, "urgency": "HIGH", "photos": photos}});
 
     // гость не может создавать метки
@@ -358,8 +363,9 @@ async fn photos_pipeline_and_access() {
     // успешное создание: огромная картинка уменьшается и перекодируется в JPEG
     let d = env.ok(Some(&v), mk, base("SEARCH_RESCUE", vec![png_data_url(2400, 1200), png_data_url(100, 100)])).await;
     let marker = d["createMapMarker"]["id"].as_str().unwrap().to_string();
-    let photos: Vec<String> = d["createMapMarker"]["photos"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect();
-    assert_eq!(photos.len(), 2);
+    assert_eq!(d["createMapMarker"]["photos"].as_array().unwrap().len(), 0, "до проверки публичных фото нет");
+    let photos: Vec<String> = d["createMapMarker"]["pendingPhotos"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect();
+    assert_eq!(photos.len(), 2, "автор видит свои фото на проверке");
     assert_eq!(d["createMapMarker"]["createdByName"], "Иванов Алексей");
 
     let get = |uri: String, cookie: Option<String>| { let app = env.app.clone(); async move {
@@ -369,6 +375,63 @@ async fn photos_pipeline_and_access() {
         let (st, headers) = (res.status(), res.headers().clone());
         (st, headers, res.into_body().collect().await.unwrap().to_bytes())
     } };
+
+    // ---- предварительная модерация ----
+    let admin = env.admin().await;
+    let org = env.organizer().await;
+    let (st, _, _) = get(photos[0].clone(), None).await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED, "гость не видит фото на проверке");
+    let (st, _, _) = get(photos[0].clone(), Some(org.clone())).await;
+    assert_eq!(st, StatusCode::NOT_FOUND, "чужой пользователь не видит фото на проверке");
+    let (st, h, _) = get(photos[0].clone(), Some(v.clone())).await;
+    assert_eq!(st, StatusCode::OK, "автор видит своё фото");
+    assert_eq!(h[header::CACHE_CONTROL], "private, no-store");
+    let (st, _, _) = get(photos[0].clone(), Some(admin.clone())).await;
+    assert_eq!(st, StatusCode::OK, "администратор видит фото на проверке");
+    let list = "{ mapMarkers { id photos pendingPhotos } }";
+    for (who, label) in [(None, "гость"), (Some(org.as_str()), "другой пользователь")] {
+        let d = env.ok(who, list, json!({})).await;
+        let m = d["mapMarkers"].as_array().unwrap().iter().find(|m| m["id"] == marker.as_str()).unwrap();
+        assert!(m["photos"].as_array().unwrap().is_empty() && m["pendingPhotos"].as_array().unwrap().is_empty(), "{label} не видит фото на проверке");
+    }
+    let queue = "{ photoModerationQueue { id markerId markerTitle url uploadedByName } }";
+    let (_, code) = env.err(Some(&v), queue, json!({})).await;
+    assert_eq!(code, "FORBIDDEN", "очередь модерации — только администратору");
+    let (_, code) = env.err(None, queue, json!({})).await;
+    assert_eq!(code, "UNAUTHENTICATED");
+    let q = env.ok(Some(&admin), queue, json!({})).await;
+    let items = q["photoModerationQueue"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["uploadedByName"], "Иванов Алексей");
+    let ids: Vec<String> = items.iter().map(|i| i["id"].as_str().unwrap().to_string()).collect();
+    let approve = "mutation($p:ID!){approvePhoto(photoId:$p){photos pendingPhotos}}";
+    let reject = "mutation($p:ID!,$r:String){rejectPhoto(photoId:$p,reason:$r){photos pendingPhotos}}";
+    let (_, code) = env.err(Some(&v), approve, json!({"p": ids[0]})).await;
+    assert_eq!(code, "FORBIDDEN", "автор не может одобрить своё фото");
+    let (_, code) = env.err(Some(&v), reject, json!({"p": ids[0], "r": null})).await;
+    assert_eq!(code, "FORBIDDEN");
+    let d = env.ok(Some(&admin), approve, json!({"p": ids[0]})).await;
+    assert_eq!(d["approvePhoto"]["photos"].as_array().unwrap().len(), 1);
+    assert_eq!(d["approvePhoto"]["pendingPhotos"].as_array().unwrap().len(), 1);
+    let (_, code) = env.err(Some(&admin), approve, json!({"p": ids[0]})).await;
+    assert_eq!(code, "CONFLICT", "повторно одобрить нельзя");
+    let d = env.ok(Some(&admin), reject, json!({"p": ids[1], "r": "Лицо ребёнка"})).await;
+    assert_eq!(d["rejectPhoto"]["pendingPhotos"].as_array().unwrap().len(), 0);
+    let (st, _, _) = get(photos[1].clone(), Some(admin.clone())).await;
+    assert_eq!(st, StatusCode::NOT_FOUND, "отклонённое фото удалено");
+    let logged: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = 'photo.reject' AND details->>'reason' = 'Лицо ребёнка'")
+        .fetch_one(&env.pool).await.unwrap();
+    assert_eq!(logged, 1, "причина отказа записана в журнал");
+    // после одобрения фото публично, остальное — без изменений
+    let d = env.ok(None, list, json!({})).await;
+    let m = d["mapMarkers"].as_array().unwrap().iter().find(|m| m["id"] == marker.as_str()).unwrap();
+    assert_eq!(m["photos"].as_array().unwrap().len(), 1);
+    let photos = vec![m["photos"][0].as_str().unwrap().to_string()];
+    // фото администратора публикуются сразу
+    let d = env.ok(Some(&admin), mk, base("SEARCH_RESCUE", vec![png_data_url(80, 80)])).await;
+    assert_eq!(d["createMapMarker"]["photos"].as_array().unwrap().len(), 1);
+    assert_eq!(d["createMapMarker"]["pendingPhotos"].as_array().unwrap().len(), 0);
+
     let (st, h, body) = get(photos[0].clone(), None).await;
     assert_eq!(st, StatusCode::OK, "фото ПСО публичны (PUBLIC_MARKER_PHOTOS=true)");
     assert_eq!(h[header::CONTENT_TYPE], "image/jpeg");
@@ -398,7 +461,6 @@ async fn photos_pipeline_and_access() {
     let appr = "mutation($m:ID!){approveMarkerClose(markerId:$m){status photos}}";
     let (_, code) = env.err(Some(&v), appr, json!({"m": marker})).await;
     assert_eq!(code, "FORBIDDEN");
-    let admin = env.admin().await;
     let d = env.ok(Some(&admin), appr, json!({"m": marker})).await;
     assert_eq!(d["approveMarkerClose"]["status"], "FOUND");
     // закрытая ПСО исчезает сразу: метка, фото и отчёт удалены из БД
@@ -644,5 +706,129 @@ async fn capacity_profile_and_password() {
     let (_, code) = env.err(None, "mutation{login(email:\"volunteer@donstu.ru\",password:\"vol123\"){user{id}}}", json!({})).await;
     assert_eq!(code, "BAD_USER_INPUT", "старый пароль больше не подходит");
     env.login("volunteer@donstu.ru", "Новый-пароль-2026").await;
+    env.cleanup().await;
+}
+
+// ------------------------------------------------------------------------------------------------
+fn token_from(mail: &volontiers_server::mail::Mail, key: &str) -> String {
+    let marker = format!("/?{key}=");
+    let rest = mail.text.split(&marker).nth(1).unwrap_or_else(|| panic!("в письме нет ссылки {key}: {}", mail.text));
+    rest.split_whitespace().next().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn email_verification_and_password_reset() {
+    let env = Env::new().await;
+    let reg = "mutation($e:String!){register(firstName:\"Мария\",lastName:\"Почтова\",email:$e,password:\"Str0ng-pass\",role:VOLUNTEER,consent:true){user{id emailVerified volonteerId}}}";
+    let d = env.ok(None, reg, json!({"e": "maria@x.ru"})).await;
+    assert_eq!(d["register"]["user"]["emailVerified"], false);
+
+    // --- подтверждение почты
+    let mails = env.mailer.take_outbox();
+    assert_eq!(mails.len(), 1, "при регистрации уходит одно письмо");
+    assert_eq!(mails[0].to, "maria@x.ru");
+    assert!(mails[0].subject.contains("Подтвердите"));
+    let verify = "mutation($t:String!){verifyEmail(token:$t)}";
+    let (_, code) = env.err(None, verify, json!({"t": "не-тот-токен"})).await;
+    assert_eq!(code, "BAD_USER_INPUT");
+    let token = token_from(&mails[0], "verify");
+    let stored: String = sqlx::query_scalar("SELECT token_hash FROM email_tokens WHERE purpose = 'VERIFY_EMAIL'").fetch_one(&env.pool).await.unwrap();
+    assert_ne!(stored, token, "в базе лежит только хэш токена");
+    assert_eq!(stored.len(), 64);
+    // токен от письма для сброса пароля не подходит для подтверждения почты (виды токенов не смешиваются) — проверим ниже
+    assert_eq!(env.ok(None, verify, json!({"t": token})).await["verifyEmail"], true);
+    let (_, code) = env.err(None, verify, json!({"t": token})).await;
+    assert_eq!(code, "BAD_USER_INPUT", "ссылка одноразовая");
+    let me = env.login("maria@x.ru", "Str0ng-pass").await;
+    assert_eq!(env.ok(Some(&me), "{ me { emailVerified } }", json!({})).await["me"]["emailVerified"], true);
+    // уже подтверждена — повторная отправка ничего не шлёт
+    env.ok(Some(&me), "mutation{resendVerification}", json!({})).await;
+    assert!(env.mailer.take_outbox().is_empty());
+    let (_, code) = env.err(None, "mutation{resendVerification}", json!({})).await;
+    assert_eq!(code, "UNAUTHENTICATED");
+
+    // --- восстановление пароля
+    let ask = "mutation($e:String!){requestPasswordReset(email:$e)}";
+    assert_eq!(env.ok(None, ask, json!({"e": "nobody@x.ru"})).await["requestPasswordReset"], true, "ответ одинаков для неизвестного адреса");
+    assert!(env.mailer.take_outbox().is_empty(), "неизвестному адресу письмо не уходит");
+    assert_eq!(env.ok(None, ask, json!({"e": "Maria@X.ru"})).await["requestPasswordReset"], true);
+    let mails = env.mailer.take_outbox();
+    assert_eq!(mails.len(), 1);
+    assert!(mails[0].subject.contains("Восстановление"));
+    env.ok(None, ask, json!({"e": "maria@x.ru"})).await;
+    assert!(env.mailer.take_outbox().is_empty(), "повторный запрос в течение минуты письма не шлёт");
+    let reset_token = token_from(&mails[0], "reset");
+
+    let reset = "mutation($t:String!,$p:String!){resetPassword(token:$t,newPassword:$p)}";
+    let (_, code) = env.err(None, reset, json!({"t": token, "p": "N3w-strong-pass"})).await;
+    assert_eq!(code, "BAD_USER_INPUT", "токен подтверждения почты не меняет пароль");
+    let (m, _) = env.err(None, reset, json!({"t": reset_token, "p": "short"})).await;
+    assert!(m.contains("8 символов"), "{m}");
+    // слабый пароль не сжигает ссылку
+    assert_eq!(env.ok(None, reset, json!({"t": reset_token, "p": "N3w-strong-pass"})).await["resetPassword"], true);
+    let (_, code) = env.err(None, reset, json!({"t": reset_token, "p": "An0ther-pass-1"})).await;
+    assert_eq!(code, "BAD_USER_INPUT", "ссылка одноразовая");
+    assert!(env.ok(Some(&me), "{ me { id } }", json!({})).await["me"].is_null(), "старые сессии отозваны");
+    let (_, code) = env.err(None, "mutation{login(email:\"maria@x.ru\",password:\"Str0ng-pass\"){expiresAt}}", json!({})).await;
+    assert_eq!(code, "BAD_USER_INPUT", "старый пароль не работает");
+    env.login("maria@x.ru", "N3w-strong-pass").await;
+    let logged: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action IN ('auth.reset_requested','auth.password_reset','auth.email_verified')").fetch_one(&env.pool).await.unwrap();
+    assert_eq!(logged, 3, "события записаны в журнал");
+
+    // --- просроченная ссылка и переход по ссылке сброса подтверждает почту
+    env.ok(None, reg, json!({"e": "olga@x.ru"})).await;
+    env.mailer.take_outbox();
+    sqlx::query("UPDATE users SET email_verified_at = NULL WHERE lower(email) = 'maria@x.ru'").execute(&env.pool).await.unwrap();
+    sqlx::query("DELETE FROM email_tokens").execute(&env.pool).await.unwrap();
+    env.ok(None, ask, json!({"e": "olga@x.ru"})).await;
+    let mails = env.mailer.take_outbox();
+    let t = token_from(&mails[0], "reset");
+    sqlx::query("UPDATE email_tokens SET expires_at = now() - interval '1 minute'").execute(&env.pool).await.unwrap();
+    let (m, code) = env.err(None, reset, json!({"t": t, "p": "N3w-strong-pass"})).await;
+    assert_eq!(code, "BAD_USER_INPUT", "{m}");
+    sqlx::query("UPDATE email_tokens SET expires_at = now() + interval '1 hour'").execute(&env.pool).await.unwrap();
+    env.ok(None, reset, json!({"t": t, "p": "N3w-strong-pass"})).await;
+    let olga = env.login("olga@x.ru", "N3w-strong-pass").await;
+    assert_eq!(env.ok(Some(&olga), "{ me { emailVerified } }", json!({})).await["me"]["emailVerified"], true, "получение письма подтверждает адрес");
+
+    // --- смена адреса администратором аннулирует выданные ссылки
+    sqlx::query("UPDATE email_tokens SET created_at = created_at - interval '5 minutes'").execute(&env.pool).await.unwrap();
+    env.ok(None, ask, json!({"e": "olga@x.ru"})).await;
+    let mails = env.mailer.take_outbox();
+    sqlx::query("UPDATE users SET email = 'olga-new@x.ru' WHERE lower(email) = 'olga@x.ru'").execute(&env.pool).await.unwrap();
+    let t = token_from(&mails[0], "reset");
+    let (_, code) = env.err(None, reset, json!({"t": t, "p": "An0ther-pass-1"})).await;
+    assert_eq!(code, "BAD_USER_INPUT");
+
+    // --- удаление аккаунта удаляет токены
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM email_tokens").fetch_one(&env.pool).await.unwrap();
+    assert!(before > 0);
+    env.ok(Some(&env.login("maria@x.ru", "N3w-strong-pass").await), "mutation{deleteMyAccount(password:\"N3w-strong-pass\")}", json!({})).await;
+    env.cleanup().await;
+}
+
+#[tokio::test]
+async fn unverified_email_is_limited_when_required() {
+    let env = Env::with(|c| c.require_verified_email = true).await;
+    let reg = "mutation{register(firstName:\"Мария\",lastName:\"Почтова\",email:\"maria@x.ru\",password:\"Str0ng-pass\",role:VOLUNTEER,consent:true){user{volonteerId}}}";
+    let vol = env.ok(None, reg, json!({})).await["register"]["user"]["volonteerId"].as_str().unwrap().to_string();
+    let ev = env.ok(None, "{ availableEvents { id } }", json!({})).await["availableEvents"][0]["id"].as_str().unwrap().to_string();
+    let me = env.login("maria@x.ru", "Str0ng-pass").await;
+    let sub = "mutation($v:ID!,$e:ID!){submitEventRequest(volonteerId:$v,eventId:$e){id}}";
+    let (m, code) = env.err(Some(&me), sub, json!({"v": vol, "e": ev})).await;
+    assert_eq!(code, "EMAIL_NOT_VERIFIED", "{m}");
+    let marker = "mutation{createMapMarker(input:{type:REGULAR,title:\"Нужна помощь\",description:\"Описание\",lat:47.2,lng:39.7,urgency:LOW}){id}}";
+    let (_, code) = env.err(Some(&me), marker, json!({})).await;
+    assert_eq!(code, "EMAIL_NOT_VERIFIED");
+    // читать данные и входить можно
+    env.ok(Some(&me), "{ events { id } }", json!({})).await;
+
+    let mails = env.mailer.take_outbox();
+    env.ok(Some(&me), "mutation($t:String!){verifyEmail(token:$t)}", json!({"t": token_from(&mails[0], "verify")})).await;
+    // права берутся из БД при каждом запросе — перелогин не нужен
+    env.ok(Some(&me), sub, json!({"v": vol, "e": ev})).await;
+    env.ok(Some(&me), marker, json!({})).await;
+    // администратор, организатор и волонтёр из сида подтверждены
+    env.ok(Some(&env.admin().await), marker, json!({})).await;
     env.cleanup().await;
 }

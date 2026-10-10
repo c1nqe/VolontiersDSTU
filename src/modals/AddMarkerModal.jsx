@@ -47,7 +47,9 @@ export default function AddMarkerModal({ onClose, lat, lng, onCreated }) {
       showToast(res.message, 'error');
       return;
     }
-    const photoNote = isRescue && photos.length ? ` с ${photos.length} фото` : '';
+    const hasPhotos = isRescue && photos.length > 0;
+    const needsReview = hasPhotos && store.getCurrentUser()?.role !== 'ADMIN';
+    const photoNote = hasPhotos ? (needsReview ? '. Фото появятся на карте после проверки администратором' : ` с ${photos.length} фото`) : '';
     showToast(`${isRescue ? 'Поисковая метка' : 'Метка'} «${res.marker.title}» размещена${photoNote}.`);
     onClose();
     onCreated?.(res.marker);

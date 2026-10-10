@@ -7,6 +7,8 @@ use async_graphql::ErrorExtensions;
 pub enum AppError {
     Unauthenticated,
     Forbidden,
+    /// Действие требует подтверждённой электронной почты.
+    EmailNotVerified,
     NotFound(String),
     Validation(String),
     Conflict(String),
@@ -23,6 +25,7 @@ impl AppError {
         match self {
             AppError::Unauthenticated => "UNAUTHENTICATED",
             AppError::Forbidden => "FORBIDDEN",
+            AppError::EmailNotVerified => "EMAIL_NOT_VERIFIED",
             AppError::NotFound(_) => "NOT_FOUND",
             AppError::Validation(_) => "BAD_USER_INPUT",
             AppError::Conflict(_) => "CONFLICT",
@@ -35,6 +38,7 @@ impl AppError {
         match self {
             AppError::Unauthenticated => "Требуется вход в систему".into(),
             AppError::Forbidden => "Недостаточно прав для этого действия".into(),
+            AppError::EmailNotVerified => "Подтвердите адрес электронной почты: ссылка отправлена в письме при регистрации. Отправить письмо ещё раз можно в личном кабинете.".into(),
             AppError::NotFound(m) | AppError::Validation(m) | AppError::Conflict(m) | AppError::TooManyRequests(m) => m.clone(),
             AppError::Internal(_) => "Внутренняя ошибка сервера. Повторите попытку позже.".into(),
         }

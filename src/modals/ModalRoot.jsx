@@ -14,6 +14,8 @@ const REGISTRY = {
   cancelEvent: lazy(() => import('./CancelEventModal.jsx')),
   deleteAccount: lazy(() => import('./DeleteAccountModal.jsx')),
   editProfile: lazy(() => import('./EditProfileModal.jsx')),
+  forgotPassword: lazy(() => import('./PasswordResetModals.jsx').then((m) => ({ default: m.ForgotPasswordModal }))),
+  resetPassword: lazy(() => import('./PasswordResetModals.jsx').then((m) => ({ default: m.ResetPasswordModal }))),
   changePassword: lazy(() => import('./ChangePasswordModal.jsx')),
 };
 

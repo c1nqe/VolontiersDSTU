@@ -54,7 +54,9 @@ async fn main() -> anyhow::Result<()> {
         "serve" => {
             if cfg.run_migrations { MIGRATOR.run(&pool).await?; }
             let bind = cfg.bind.clone();
-            let state = app::AppState { pool, cfg: Arc::new(cfg), limiter: Arc::new(RateLimiter::new()) };
+            let mailer = Arc::new(volontiers_server::mail::Mailer::from_config(&cfg)?);
+            if !mailer.enabled() { tracing::warn!("SMTP не настроен: восстановление пароля и подтверждение почты недоступны"); }
+            let state = app::AppState { pool, cfg: Arc::new(cfg), limiter: Arc::new(RateLimiter::new()), mailer };
             let router = app::router(state);
             let listener = tokio::net::TcpListener::bind(&bind).await.with_context(|| format!("не удалось занять {bind}"))?;
             tracing::info!("сервер запущен на http://{bind}");
