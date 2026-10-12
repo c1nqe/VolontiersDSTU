@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Icon from '../components/Icon.jsx';
 import { StatCard, StatsGrid } from '../components/Common.jsx';
 import LeafletMap from '../map/LeafletMap.jsx';
@@ -24,17 +24,14 @@ export default function MapView() {
   const { openModal, showToast } = useUI();
   const [filter, setFilter] = useState('ALL');
   const [focus, setFocus] = useState(null);
+  // Режим постановки метки: пока он выключен, карту можно только двигать и смотреть.
+  const [placing, setPlacing] = useState(false);
 
   const all = store.getMapMarkers('ALL');
   const markers = filterMarkers(all, filter);
   const count = (fn) => all.filter(fn).length;
 
   const openAddMarker = (coords) => {
-    if (!store.getCurrentUser()) {
-      showToast('Чтобы поставить метку, войдите в систему', 'info');
-      openModal('login');
-      return;
-    }
     openModal('addMarker', {
       ...coords,
       onCreated: (m) => {
@@ -43,6 +40,30 @@ export default function MapView() {
       },
     });
     if (coords) showToast('Координаты подставлены из точки на карте', 'info');
+  };
+
+  const togglePlacing = () => {
+    if (placing) { setPlacing(false); return; }
+    if (!store.getCurrentUser()) {
+      showToast('Чтобы поставить метку, войдите в систему', 'info');
+      openModal('login');
+      return;
+    }
+    setPlacing(true);
+  };
+
+  // Esc выключает режим; выход из системы или смена вкладки тоже (компонент размонтируется).
+  useEffect(() => {
+    if (!placing) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setPlacing(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [placing]);
+
+  const handleMapClick = (latlng) => {
+    if (!placing) return;
+    setPlacing(false);
+    openAddMarker({ lat: Number(latlng.lat.toFixed(4)), lng: Number(latlng.lng.toFixed(4)) });
   };
 
   return (
@@ -69,8 +90,13 @@ export default function MapView() {
             </button>
           ))}
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => openAddMarker()}>
-          <Icon name="mapPin" /> Поставить метку
+        <button
+          type="button"
+          className={`btn ${placing ? 'btn-outline-danger' : 'btn-primary'}`}
+          aria-pressed={placing}
+          onClick={togglePlacing}
+        >
+          {placing ? <><Icon name="cross" /> Отменить постановку</> : <><Icon name="mapPin" /> Поставить метку</>}
         </button>
       </div>
 
@@ -79,9 +105,14 @@ export default function MapView() {
           <LeafletMap
             markers={markers}
             focus={focus}
-            onMapClick={(latlng) => openAddMarker({ lat: Number(latlng.lat.toFixed(4)), lng: Number(latlng.lng.toFixed(4)) })}
+            placing={placing}
+            onMapClick={handleMapClick}
           />
-          <div className="map-hint"><Icon name="info" /> Нажмите на карту, чтобы поставить метку в этой точке</div>
+          {placing ? (
+            <div className="map-hint map-hint-active" role="status"><Icon name="mapPin" /> Нажмите на карту, где нужна метка. Esc — отмена</div>
+          ) : (
+            <div className="map-hint"><Icon name="info" /> Чтобы поставить метку, нажмите «Поставить метку» над картой</div>
+          )}
         </div>
 
         <aside className="map-sidebar">

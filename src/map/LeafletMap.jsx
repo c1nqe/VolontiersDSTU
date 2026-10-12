@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents } fr
 import 'leaflet/dist/leaflet.css';
 import MarkerDetails from './MarkerDetails.jsx';
 import { getMarkerColor } from '../utils/format.js';
+import { TILES } from './tiles.js';
 
 const ROSTOV_CENTER = [47.2313, 39.7233];
 
@@ -36,19 +37,31 @@ function ResizeWatcher() {
   return null;
 }
 
-export default function LeafletMap({ markers, onMapClick, focus }) {
+/** MapContainer читает className только при создании, поэтому класс режима переключаем на самом контейнере. */
+function PlacingCursor({ placing }) {
+  const map = useMap();
+  useEffect(() => {
+    const el = map.getContainer();
+    el.classList.toggle('map-canvas-placing', placing);
+    return () => el.classList.remove('map-canvas-placing');
+  }, [map, placing]);
+  return null;
+}
+
+export default function LeafletMap({ markers, onMapClick, focus, placing = false }) {
   const markerRefs = useRef({});
 
   return (
     <MapContainer center={ROSTOV_CENTER} zoom={13} className="map-canvas" scrollWheelZoom>
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | VolontiersDSTU'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        maxZoom={19}
+        attribution={TILES.attribution}
+        url={TILES.url}
+        maxZoom={TILES.maxZoom}
       />
       <ClickHandler onMapClick={onMapClick} />
       <FocusController focus={focus} markerRefs={markerRefs} />
       <ResizeWatcher />
+      <PlacingCursor placing={placing} />
 
       {markers.map((m) => {
         const color = getMarkerColor(m);

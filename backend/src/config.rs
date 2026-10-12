@@ -46,6 +46,23 @@ pub struct Config {
     pub smtp_tls: SmtpTls,
     /// Без подтверждённой почты нельзя создавать события, заявки и метки.
     pub require_verified_email: bool,
+    /// Источники плиток карты для директивы `img-src` в Content-Security-Policy.
+    pub map_tile_hosts: Vec<String>,
+}
+
+/// Источники плиток по умолчанию: стандартная карта OpenStreetMap и CARTO.
+pub const DEFAULT_TILE_HOSTS: [&str; 2] = ["https://*.tile.openstreetmap.org", "https://*.basemaps.cartocdn.com"];
+
+/// Допускаются только адреса вида `https://host` или `https://*.host[:порт]` — без путей, пробелов и `;`,
+/// чтобы значение из окружения нельзя было использовать для подмены остальных директив CSP.
+pub fn valid_tile_host(h: &str) -> bool {
+    let Some(rest) = h.strip_prefix("https://") else { return false };
+    let (host, port) = match rest.rsplit_once(':') { Some((a, b)) => (a, Some(b)), None => (rest, None) };
+    if let Some(p) = port { if p.is_empty() || p.len() > 5 || !p.bytes().all(|c| c.is_ascii_digit()) { return false; } }
+    let host = host.strip_prefix("*.").unwrap_or(host);
+    !host.is_empty()
+        && host.contains('.')
+        && host.split('.').all(|l| !l.is_empty() && l.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'))
 }
 
 fn env(name: &str) -> Option<String> {
@@ -107,6 +124,18 @@ impl Config {
             bail!("REQUIRE_VERIFIED_EMAIL=true требует настроенного SMTP (SMTP_HOST, SMTP_FROM)");
         }
 
+        let map_tile_hosts = match env("MAP_TILE_HOSTS") {
+            None => DEFAULT_TILE_HOSTS.iter().map(|h| h.to_string()).collect(),
+            Some(v) => {
+                let hosts: Vec<String> = v.split(|c: char| c == ',' || c.is_whitespace()).filter(|h| !h.is_empty()).map(str::to_string).collect();
+                if let Some(bad) = hosts.iter().find(|h| !valid_tile_host(h)) {
+                    bail!("MAP_TILE_HOSTS: «{bad}» не подходит; ожидается https://хост или https://*.хост");
+                }
+                if hosts.is_empty() { bail!("MAP_TILE_HOSTS задан, но пуст"); }
+                hosts
+            }
+        };
+
         Ok(Config {
             database_url,
             bind: env("BIND").unwrap_or_else(|| "127.0.0.1:8080".into()),
@@ -128,6 +157,7 @@ impl Config {
             smtp_from: env("SMTP_FROM"),
             smtp_tls,
             require_verified_email,
+            map_tile_hosts,
         })
     }
 
@@ -154,6 +184,22 @@ impl Config {
             smtp_from: None,
             smtp_tls: SmtpTls::StartTls,
             require_verified_email: false,
+            map_tile_hosts: DEFAULT_TILE_HOSTS.iter().map(|h| h.to_string()).collect(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_tile_host;
+
+    #[test]
+    fn tile_hosts_are_validated() {
+        for ok in ["https://tile.openstreetmap.org", "https://*.tile.openstreetmap.org", "https://tiles.donstu.ru:8443"] {
+            assert!(valid_tile_host(ok), "{ok}");
+        }
+        for bad in ["http://tile.example.org", "https://", "https://localhost", "https://a.b/path", "https://a.b; script-src *", "https://a b.c", "https://*.*.b.c", "https://a.b:", "https://a.b:12x"] {
+            assert!(!valid_tile_host(bad), "{bad}");
         }
     }
 }

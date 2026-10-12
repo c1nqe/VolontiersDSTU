@@ -170,13 +170,17 @@ pub fn router(state: AppState) -> Router {
     }
 
     let hdr = |name: &'static str, value: &'static str| SetResponseHeaderLayer::if_not_present(HeaderName::from_static(name), HeaderValue::from_static(value));
+    let csp = format!(
+        "default-src 'self'; img-src 'self' data: blob: {}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        cfg.map_tile_hosts.join(" ")
+    );
+    let csp = HeaderValue::from_str(&csp).expect("CSP: недопустимые символы в MAP_TILE_HOSTS");
     app.layer(RequestBodyLimitLayer::new(cfg.max_body_bytes))
         .layer(hdr("x-content-type-options", "nosniff"))
         .layer(hdr("x-frame-options", "DENY"))
         .layer(hdr("referrer-policy", "same-origin"))
         .layer(hdr("permissions-policy", "camera=(), microphone=(), geolocation=()"))
-        .layer(hdr("content-security-policy",
-            "default-src 'self'; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"))
+        .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("content-security-policy"), csp))
         .layer(TraceLayer::new_for_http())
 }
 
