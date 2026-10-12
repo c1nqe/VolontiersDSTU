@@ -119,7 +119,7 @@ fn rate_limit(ctx: &Context<'_>, key: &'static str, limit: u32) -> AppResult<()>
 }
 
 /// Версия политики обработки персональных данных (docs/PRIVACY.md). Меняется при изменении политики.
-pub const PRIVACY_POLICY_VERSION: &str = "2026-10-10";
+pub const PRIVACY_POLICY_VERSION: &str = "2026-10-12";
 
 // ---------- Письма: подтверждение почты и восстановление пароля ------------------------------------------
 const VERIFY_TTL_HOURS: i32 = 72;
@@ -166,6 +166,38 @@ async fn send_verification(ctx: &Context<'_>, user_id: Uuid) {
         Ok(())
     }.await;
     if res.is_err() { tracing::warn!("не удалось подготовить письмо подтверждения"); }
+}
+
+/// Письма-уведомления. Получатели — только пользователи с подтверждённой почтой и не удалённые;
+/// ошибки отправки не ломают основное действие.
+#[derive(sqlx::FromRow)]
+struct Recipient { email: String, first_name: String }
+
+async fn recipients_by_user(s: &AppState, user_id: Uuid) -> Vec<Recipient> {
+    sqlx::query_as("SELECT u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1 AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
+        .bind(user_id).fetch_all(&s.pool).await.unwrap_or_default()
+}
+
+async fn recipients_admins(s: &AppState) -> Vec<Recipient> {
+    sqlx::query_as("SELECT u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.role = 'ADMIN' AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
+        .fetch_all(&s.pool).await.unwrap_or_default()
+}
+
+async fn recipients_by_volonteer(conn: &mut PgConnection, vol: Uuid) -> Vec<Recipient> {
+    sqlx::query_as("SELECT u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.volonteer_id = $1 AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
+        .bind(vol).fetch_all(conn).await.unwrap_or_default()
+}
+
+/// Волонтёры (с подтверждённой почтой), у которых заявки на событие ещё не закрыты.
+async fn recipients_open_requests(conn: &mut PgConnection, event_id: Uuid) -> Vec<Recipient> {
+    sqlx::query_as("SELECT DISTINCT u.email, p.first_name FROM volonteer_event_requests r JOIN users u ON u.volonteer_id = r.volonteer_id JOIN persons p ON p.id = u.person_id
+                     WHERE r.event_id = $1 AND r.status IN ('OPEN','ACCEPTED') AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
+        .bind(event_id).fetch_all(conn).await.unwrap_or_default()
+}
+
+fn send_all(s: &AppState, to: Vec<Recipient>, build: impl Fn(&Recipient) -> crate::mail::Mail) {
+    if !s.mailer.enabled() { return; }
+    for r in &to { s.mailer.send(build(r)); }
 }
 
 /// Мутации, создающие контент, при REQUIRE_VERIFIED_EMAIL доступны только с подтверждённой почтой.
@@ -635,12 +667,14 @@ pub async fn cancel_event(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -
     if !v.can_act_for_org(org) { return Err(AppError::Forbidden); }
     let affected: i64 = sqlx::query_scalar("SELECT count(*) FROM volonteer_event_requests WHERE event_id = $1 AND status IN ('OPEN','ACCEPTED')")
         .bind(id).fetch_one(&mut *tx).await?;
+    let to_notify = if st(ctx).mailer.enabled() { recipients_open_requests(&mut tx, id).await } else { vec![] };
     let n = sqlx::query("UPDATE events SET status = 'CANCELLED', cancel_reason = $2 WHERE id = $1 AND status IN ('DRAFT','ACCEPTED')")
         .bind(id).bind(&reason).execute(&mut *tx).await?.rows_affected();
     if n == 0 { return Err(AppError::conflict("Отменить можно только событие в статусе DRAFT или ACCEPTED")); }
     audit(&mut tx, Some(v), "event.cancel", "event", Some(id), json!({"requestsCancelled": affected, "withReason": reason.is_some()})).await?;
     let ev = fetch_event(&mut tx, id).await?;
     tx.commit().await?;
+    send_all(st(ctx), to_notify, |r| crate::mail::event_cancelled_mail(&r.email, &r.first_name, &ev.title, reason.as_deref()));
     Ok(ev)
 }
 
@@ -706,7 +740,7 @@ pub async fn moderate_request(ctx: &Context<'_>, id: Uuid, status: RequestStatus
     }
     let reason = clean_opt(&reason, "Причина отказа", 500)?;
     let mut tx = st(ctx).pool.begin().await?;
-    let (org, _) = request_owner(&mut tx, id).await?;
+    let (org, vol) = request_owner(&mut tx, id).await?;
     if !v.can_act_for_org(org) { return Err(AppError::Forbidden); }
     if status == RequestStatus::Accepted {
         // вместимость: блокируем строку события, чтобы две одновременные заявки не заняли последнее место
@@ -721,11 +755,14 @@ pub async fn moderate_request(ctx: &Context<'_>, id: Uuid, status: RequestStatus
         }
     }
     let n = sqlx::query("UPDATE volonteer_event_requests SET status = $2, rejection_reason = $3 WHERE id = $1 AND (status = 'OPEN' OR ($2::request_status = 'CANCELLED' AND status = 'ACCEPTED'))")
-        .bind(id).bind(status).bind(if status == RequestStatus::Cancelled { reason } else { None }).execute(&mut *tx).await?.rows_affected();
+        .bind(id).bind(status).bind(if status == RequestStatus::Cancelled { reason.clone() } else { None }).execute(&mut *tx).await?.rows_affected();
     if n == 0 { return Err(AppError::conflict("Решение по заявке уже принято и изменить его нельзя")); }
     audit(&mut tx, Some(v), "request.moderate", "request", Some(id), json!({"to": status})).await?;
     let r = fetch_request(&mut tx, id).await?;
+    let to_notify = if st(ctx).mailer.enabled() { recipients_by_volonteer(&mut tx, vol).await } else { vec![] };
     tx.commit().await?;
+    let accepted = status == RequestStatus::Accepted;
+    send_all(st(ctx), to_notify, |rc| crate::mail::request_decision_mail(&rc.email, &rc.first_name, &r.event_title, accepted, reason.as_deref()));
     Ok(r)
 }
 
@@ -753,9 +790,12 @@ pub async fn cancel_request(ctx: &Context<'_>, id: Uuid) -> AppResult<VolonteerE
     if !(v.can_act_for_org(org) || v.can_act_for_volonteer(vol)) { return Err(AppError::Forbidden); }
     let n = sqlx::query("UPDATE volonteer_event_requests SET status = 'CANCELLED' WHERE id = $1 AND status IN ('OPEN','ACCEPTED')").bind(id).execute(&mut *tx).await?.rows_affected();
     if n == 0 { return Err(AppError::conflict("Отменить можно только заявку, по которой ещё не подтверждены часы")); }
-    audit(&mut tx, Some(v), "request.cancel", "request", Some(id), json!({"by": if v.can_act_for_volonteer(vol) { "volonteer" } else { "organizer" }})).await?;
+    let by_volonteer = v.can_act_for_volonteer(vol);
+    audit(&mut tx, Some(v), "request.cancel", "request", Some(id), json!({"by": if by_volonteer { "volonteer" } else { "organizer" }})).await?;
     let r = fetch_request(&mut tx, id).await?;
+    let to_notify = if by_volonteer || !st(ctx).mailer.enabled() { vec![] } else { recipients_by_volonteer(&mut tx, vol).await };
     tx.commit().await?;
+    send_all(st(ctx), to_notify, |rc| crate::mail::request_decision_mail(&rc.email, &rc.first_name, &r.event_title, false, None));
     Ok(r)
 }
 
@@ -923,6 +963,10 @@ pub async fn create_marker(ctx: &Context<'_>, input: MapMarkerInput) -> AppResul
     }
     audit(&mut tx, Some(v), "marker.create", "marker", Some(id), json!({"type": input.kind, "photos": photos.len(), "photos_status": status})).await?;
     tx.commit().await?;
+    if status == "PENDING" && !photos.is_empty() && st(ctx).mailer.enabled() {
+        let link = format!("{}/", st(ctx).cfg.public_url);
+        send_all(st(ctx), recipients_admins(st(ctx)).await, |r| crate::mail::photos_pending_mail(&r.email, &r.first_name, &title, photos.len(), &link));
+    }
     marker_one(ctx, id).await
 }
 
@@ -989,11 +1033,18 @@ pub async fn reject_photo(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -
     if !v.is_admin() { return Err(AppError::Forbidden); }
     let reason = clean_opt(&reason, "Причина", 500)?.unwrap_or_else(|| "Не соответствует правилам".into());
     let mut tx = st(ctx).pool.begin().await?;
-    let marker: Option<Uuid> = sqlx::query_scalar("DELETE FROM photos WHERE id = $1 AND status = 'PENDING' AND purpose = 'MARKER' RETURNING marker_id")
+    let row: Option<(Uuid, Option<Uuid>)> = sqlx::query_as("DELETE FROM photos WHERE id = $1 AND status = 'PENDING' AND purpose = 'MARKER' RETURNING marker_id, uploaded_by")
         .bind(id).fetch_optional(&mut *tx).await?;
-    let marker = marker.ok_or_else(|| AppError::conflict("Фото не ожидает проверки"))?;
+    let (marker, author) = row.ok_or_else(|| AppError::conflict("Фото не ожидает проверки"))?;
     audit(&mut tx, Some(v), "photo.reject", "photo", Some(id), json!({"marker": marker, "reason": reason})).await?;
     tx.commit().await?;
+    if let Some(author) = author {
+        let s = st(ctx);
+        if s.mailer.enabled() {
+            let title: String = sqlx::query_scalar("SELECT title FROM map_markers WHERE id = $1").bind(marker).fetch_one(&s.pool).await.unwrap_or_default();
+            send_all(s, recipients_by_user(s, author).await, |r| crate::mail::photo_rejected_mail(&r.email, &r.first_name, &title, &reason));
+        }
+    }
     marker_one(ctx, marker).await
 }
 

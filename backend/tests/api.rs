@@ -832,3 +832,69 @@ async fn unverified_email_is_limited_when_required() {
     env.ok(Some(&env.admin().await), marker, json!({})).await;
     env.cleanup().await;
 }
+
+#[tokio::test]
+async fn notification_emails_go_only_to_verified_users() {
+    let env = Env::new().await;
+    let (org, vol) = org_and_vol_ids(&env).await;
+    let (a, o, v) = (env.admin().await, env.organizer().await, env.volunteer().await);
+
+    // --- B-19: администраторам — письмо о новых фото на проверке
+    let mk = "mutation($i:MapMarkerInput!){createMapMarker(input:$i){id pendingPhotos}}";
+    let input = json!({"i": {"type": "SEARCH_RESCUE", "title": "Поиск: Письмов П.П.", "description": "Описание", "lat": 47.23, "lng": 39.71, "urgency": "HIGH", "photos": [png_data_url(300, 200)]}});
+    let d = env.ok(Some(&v), mk, input).await;
+    let photo_id = d["createMapMarker"]["pendingPhotos"][0].as_str().unwrap().rsplit('/').next().unwrap().to_string();
+    let mails = env.mailer.take_outbox();
+    assert!(!mails.is_empty() && mails.iter().all(|m| m.subject.contains("Новые фотографии")), "{mails:?}");
+    assert!(mails.iter().any(|m| m.to == "admin@donstu.ru" && m.text.contains("Письмов")), "администратор получил письмо");
+    assert!(mails.iter().all(|m| !m.text.contains("data:image")), "в письмо не попадают данные фото");
+
+    // --- B-17: автору — письмо об отклонении с причиной
+    env.ok(Some(&a), "mutation($p:ID!,$r:String){rejectPhoto(photoId:$p,reason:$r){id}}", json!({"p": photo_id, "r": "Лицо не должно быть видно"})).await;
+    let mails = env.mailer.take_outbox();
+    assert_eq!(mails.len(), 1, "{mails:?}");
+    assert_eq!(mails[0].to, "volunteer@donstu.ru");
+    assert!(mails[0].text.contains("Лицо не должно быть видно") && mails[0].text.contains("Письмов"));
+
+    // --- F-02: решения по заявкам и отмена мероприятия
+    let mk_event = |title: &'static str| { let (org, o, env) = (org.clone(), o.clone(), &env); async move {
+        env.ok(Some(&o), "mutation($org:ID!,$t:String!){createEvent(title:$t,description:\"Описание\",location:\"Место\",startDate:\"2026-12-01\",endDate:\"2026-12-01\",requiredVolunteers:5,plannedHours:2,organizationId:$org){id}}", json!({"org": org, "t": title})).await["createEvent"]["id"].as_str().unwrap().to_string()
+    } };
+    let accept_ev = |e: String| { let (a, env) = (a.clone(), &env); async move { env.ok(Some(&a), "mutation($e:ID!){moderateEvent(eventId:$e,status:ACCEPTED){status}}", json!({"e": e})).await; } };
+    let sub = "mutation($v:ID!,$e:ID!){submitEventRequest(volonteerId:$v,eventId:$e){id}}";
+    let moderate = "mutation($r:ID!,$s:RequestStatus!,$why:String){moderateRequest(requestId:$r,status:$s,rejectionReason:$why){status}}";
+
+    let e1 = mk_event("Уборка набережной").await;
+    accept_ev(e1.clone()).await;
+    let r1 = env.ok(Some(&v), sub, json!({"v": vol, "e": e1})).await["submitEventRequest"]["id"].as_str().unwrap().to_string();
+    env.mailer.take_outbox();
+    env.ok(Some(&o), moderate, json!({"r": r1, "s": "ACCEPTED", "why": null})).await;
+    let mails = env.mailer.take_outbox();
+    assert_eq!(mails.len(), 1);
+    assert!(mails[0].to == "volunteer@donstu.ru" && mails[0].subject.contains("Заявка принята") && mails[0].subject.contains("Уборка набережной"));
+
+    env.ok(Some(&o), moderate, json!({"r": r1, "s": "CANCELLED", "why": "Нет мест"})).await;
+    let mails = env.mailer.take_outbox();
+    assert_eq!(mails.len(), 1);
+    assert!(mails[0].subject.contains("Заявка отклонена") && mails[0].text.contains("Нет мест"));
+
+    let e2 = mk_event("Субботник во дворе").await;
+    accept_ev(e2.clone()).await;
+    env.ok(Some(&v), sub, json!({"v": vol, "e": e2})).await;
+    env.mailer.take_outbox();
+    env.ok(Some(&o), "mutation($e:ID!,$r:String){cancelEvent(eventId:$e,reason:$r){status}}", json!({"e": e2, "r": "Плохая погода"})).await;
+    let mails = env.mailer.take_outbox();
+    assert_eq!(mails.len(), 1, "{mails:?}");
+    assert!(mails[0].to == "volunteer@donstu.ru" && mails[0].subject.contains("Мероприятие отменено") && mails[0].text.contains("Плохая погода"));
+
+    // --- без подтверждённой почты письма не отправляются
+    sqlx::query("UPDATE users SET email_verified_at = NULL WHERE email = 'volunteer@donstu.ru'").execute(&env.pool).await.unwrap();
+    let e3 = mk_event("Акция без подтверждённой почты").await;
+    accept_ev(e3.clone()).await;
+    env.ok(Some(&v), sub, json!({"v": vol, "e": e3})).await;
+    env.mailer.take_outbox();
+    env.ok(Some(&o), "mutation($e:ID!){cancelEvent(eventId:$e){status}}", json!({"e": e3})).await;
+    assert!(env.mailer.take_outbox().is_empty(), "неподтверждённый адрес письма не получает");
+
+    env.cleanup().await;
+}

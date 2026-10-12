@@ -100,3 +100,54 @@ pub fn reset_mail(to: &str, name: &str, link: &str) -> Mail {
         ),
     }
 }
+
+const SIGNATURE: &str = "\n— Учёт волонтёров ДГТУ. Это автоматическое письмо, отвечать на него не нужно.\n";
+
+pub fn photo_rejected_mail(to: &str, name: &str, marker: &str, reason: &str) -> Mail {
+    Mail {
+        to: to.to_string(),
+        subject: "Фотография к метке не прошла проверку — Учёт волонтёров ДГТУ".into(),
+        text: format!(
+            "Здравствуйте, {name}!\n\nАдминистратор не одобрил фотографию к вашей метке «{marker}» и удалил её.\nПричина: {reason}\n\n\
+             Метка осталась на карте. Вы можете создать новую метку с подходящими фотографиями.\n{SIGNATURE}"
+        ),
+    }
+}
+
+pub fn photos_pending_mail(to: &str, name: &str, marker: &str, count: usize, link: &str) -> Mail {
+    Mail {
+        to: to.to_string(),
+        subject: "Новые фотографии ждут проверки — Учёт волонтёров ДГТУ".into(),
+        text: format!(
+            "Здравствуйте, {name}!\n\nК метке «{marker}» загружено фотографий: {count}. Они не видны другим пользователям, пока вы их не проверите.\n\
+             Откройте вкладку «Фото меток» в кабинете администратора:\n{link}\n{SIGNATURE}"
+        ),
+    }
+}
+
+pub fn event_cancelled_mail(to: &str, name: &str, event: &str, reason: Option<&str>) -> Mail {
+    let why = reason.map(|r| format!("Причина: {r}\n")).unwrap_or_default();
+    Mail {
+        to: to.to_string(),
+        subject: format!("Мероприятие отменено: {event}"),
+        text: format!("Здравствуйте, {name}!\n\nМероприятие «{event}» отменено, ваша заявка на него закрыта.\n{why}{SIGNATURE}"),
+    }
+}
+
+
+pub fn request_decision_mail(to: &str, name: &str, event: &str, accepted: bool, reason: Option<&str>) -> Mail {
+    if accepted {
+        Mail {
+            to: to.to_string(),
+            subject: format!("Заявка принята: {event}"),
+            text: format!("Здравствуйте, {name}!\n\nОрганизатор принял вашу заявку на мероприятие «{event}». Подробности смотрите в личном кабинете.\n{SIGNATURE}"),
+        }
+    } else {
+        let why = reason.map(|r| format!("Причина: {r}\n")).unwrap_or_default();
+        Mail {
+            to: to.to_string(),
+            subject: format!("Заявка отклонена: {event}"),
+            text: format!("Здравствуйте, {name}!\n\nОрганизатор отклонил или отозвал вашу заявку на мероприятие «{event}».\n{why}{SIGNATURE}"),
+        }
+    }
+}
