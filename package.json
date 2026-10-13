@@ -11,11 +11,21 @@
     "preview": "vite preview",
     "test": "vitest run"
   },
-  "keywords": ["volunteers", "dstu", "hackathon", "graphql", "dataspace-ce", "jwt", "react"],
+  "keywords": [
+    "volunteers",
+    "dstu",
+    "hackathon",
+    "graphql",
+    "dataspace-ce",
+    "jwt",
+    "react"
+  ],
   "author": "c1nqe",
   "license": "MIT",
   "dependencies": {
+    "@maplibre/maplibre-gl-leaflet": "^0.1.4",
     "leaflet": "^1.9.4",
+    "maplibre-gl": "^6.14.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-leaflet": "^4.2.1"

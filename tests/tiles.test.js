@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ATTRIBUTION, DEFAULT_TILE_URL, TRACESTRACK_ATTRIBUTION, resolveTileConfig } from '../src/map/tiles.js';
+import { DEFAULT_ATTRIBUTION, DEFAULT_TILE_URL, TRACESTRACK_ATTRIBUTION, resolveMapMode, resolveTileConfig } from '../src/map/tiles.js';
 
 describe('источник плиток карты', () => {
   it('по умолчанию — стандартная карта OpenStreetMap', () => {
@@ -40,5 +40,19 @@ describe('источник плиток карты', () => {
   it('явный VITE_TILE_URL важнее пресета', () => {
     const c = resolveTileConfig({ VITE_TILE_PROVIDER: 'tracestrack-ru', VITE_TILE_KEY: 'abcdefgh1', VITE_TILE_URL: 'https://tiles.donstu.ru/{z}/{x}/{y}.png' });
     expect(c.url).toBe('https://tiles.donstu.ru/{z}/{x}/{y}.png');
+  });
+});
+
+describe('режим карты', () => {
+  it('по умолчанию векторный, с заданным источником плиток — растровый', () => {
+    expect(resolveMapMode({})).toBe('vector');
+    expect(resolveMapMode({ VITE_TILE_URL: 'https://t.example/{z}/{x}/{y}.png' })).toBe('raster');
+    expect(resolveMapMode({ VITE_TILE_PROVIDER: 'tracestrack-ru' })).toBe('raster');
+  });
+
+  it('VITE_MAP_MODE переопределяет выбор', () => {
+    expect(resolveMapMode({ VITE_MAP_MODE: 'raster' })).toBe('raster');
+    expect(resolveMapMode({ VITE_MAP_MODE: 'vector', VITE_TILE_URL: 'https://t.example/{z}/{x}/{y}.png' })).toBe('vector');
+    expect(resolveMapMode({ VITE_MAP_MODE: 'abc' })).toBe('vector');
   });
 });

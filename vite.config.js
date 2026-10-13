@@ -21,6 +21,7 @@ export default defineConfig({
         // React и Leaflet меняются редко — отдельные чанки долго живут в кэше браузера
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;
+          if (/[\\/](maplibre-gl|@maplibre)[\\/]/.test(id)) return 'vendor-maplibre';
           if (/[\\/](leaflet|react-leaflet|@react-leaflet)[\\/]/.test(id)) return 'vendor-leaflet';
           if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react';
           return 'vendor';

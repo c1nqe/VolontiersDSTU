@@ -171,7 +171,7 @@ pub fn router(state: AppState) -> Router {
 
     let hdr = |name: &'static str, value: &'static str| SetResponseHeaderLayer::if_not_present(HeaderName::from_static(name), HeaderValue::from_static(value));
     let csp = format!(
-        "default-src 'self'; img-src 'self' data: blob: {}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        "default-src 'self'; img-src 'self' data: blob: {0}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self' {0}; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
         cfg.map_tile_hosts.join(" ")
     );
     let csp = HeaderValue::from_str(&csp).expect("CSP: недопустимые символы в MAP_TILE_HOSTS");

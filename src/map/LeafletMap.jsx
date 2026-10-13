@@ -1,9 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import MarkerDetails from './MarkerDetails.jsx';
 import { getMarkerColor } from '../utils/format.js';
-import { TILES } from './tiles.js';
+import { MAP_MODE, TILES } from './tiles.js';
+
+// MapLibre тяжёлый (WebGL), поэтому грузится отдельным чанком и только в векторном режиме.
+const VectorBasemap = lazy(() => import('./VectorBasemap.jsx'));
 
 const ROSTOV_CENTER = [47.2313, 39.7233];
 
@@ -50,15 +53,22 @@ function PlacingCursor({ placing }) {
 
 export default function LeafletMap({ markers, onMapClick, focus, placing = false }) {
   const markerRefs = useRef({});
+  const [vectorFailed, setVectorFailed] = useState(false);
+  const onVectorFail = useCallback(() => setVectorFailed(true), []);
+  const vector = MAP_MODE === 'vector' && !vectorFailed;
 
   return (
-    <MapContainer center={ROSTOV_CENTER} zoom={13} className="map-canvas" scrollWheelZoom>
-      <TileLayer
-        attribution={TILES.attribution}
-        url={TILES.url}
-        maxZoom={TILES.maxZoom}
-        referrerPolicy="strict-origin-when-cross-origin"
-      />
+    <MapContainer center={ROSTOV_CENTER} zoom={13} maxZoom={vector ? 19 : TILES.maxZoom} className="map-canvas" scrollWheelZoom>
+      {vector ? (
+        <Suspense fallback={null}><VectorBasemap onFail={onVectorFail} /></Suspense>
+      ) : (
+        <TileLayer
+          attribution={TILES.attribution}
+          url={TILES.url}
+          maxZoom={TILES.maxZoom}
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+      )}
       <ClickHandler onMapClick={onMapClick} />
       <FocusController focus={focus} markerRefs={markerRefs} />
       <ResizeWatcher />

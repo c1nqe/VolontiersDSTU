@@ -1,6 +1,7 @@
 /**
- * Источник плиток карты. По умолчанию — стандартная карта OpenStreetMap: подписи на ней берутся из
- * тега name, то есть для России они на русском. Источник можно заменить при сборке (VITE_TILE_URL,
+ * Растровые плитки: запасной режим карты (основной — векторная карта, см. ruStyle.js и resolveMapMode).
+ * По умолчанию — стандартная карта OpenStreetMap: подписи на ней берутся из тега name, то есть для России
+ * они на русском, а границы рисует поставщик. Источник можно заменить при сборке (VITE_TILE_URL,
  * VITE_TILE_ATTRIBUTION, VITE_TILE_MAX_ZOOM). Тот же адрес нужно добавить на сервере в MAP_TILE_HOSTS,
  * иначе политика CSP не даст браузеру загрузить плитки.
  *
@@ -38,3 +39,16 @@ export function resolveTileConfig(env = {}) {
 }
 
 export const TILES = resolveTileConfig(import.meta.env);
+
+/**
+ * Режим карты: 'vector' (по умолчанию) — векторная карта с границами России, включая Крым, ДНР, ЛНР,
+ * Херсонскую и Запорожскую области (см. ruStyle.js); 'raster' — обычные плитки (при заданном VITE_TILE_URL
+ * или VITE_TILE_PROVIDER, либо VITE_MAP_MODE=raster). Границы на растровых плитках определяет их поставщик.
+ */
+export function resolveMapMode(env = {}) {
+  const explicit = String(env.VITE_MAP_MODE || '').trim();
+  if (explicit === 'raster' || explicit === 'vector') return explicit;
+  return String(env.VITE_TILE_URL || '').trim() || String(env.VITE_TILE_PROVIDER || '').trim() ? 'raster' : 'vector';
+}
+
+export const MAP_MODE = resolveMapMode(import.meta.env);
