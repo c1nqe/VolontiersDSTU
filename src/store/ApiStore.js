@@ -31,6 +31,7 @@ export const HYDRATE_QUERY = `query Hydrate {
   session { expiresAt }
   privacyPolicyVersion
   mailEnabled
+  demoAccounts
   events { ${EVENT} }
   organizations { ${ORG} }
   volonteers { ${VOL} }
@@ -39,7 +40,7 @@ export const HYDRATE_QUERY = `query Hydrate {
   mapMarkers { ${MARKER} }
 }`;
 
-const EMPTY = () => ({ user: null, expiresAt: null, policyVersion: null, mailEnabled: false, events: [], organizations: [], volonteers: [], requests: [], reviews: [], markers: [], photoQueue: [] });
+const EMPTY = () => ({ user: null, expiresAt: null, policyVersion: null, mailEnabled: false, demoAccounts: false, events: [], organizations: [], volonteers: [], requests: [], reviews: [], markers: [], photoQueue: [] });
 
 function normalizeUser(u) {
   return u ? { ...u, volunteerId: u.volonteerId, orgId: u.organizationId } : null;
@@ -107,6 +108,7 @@ export class ApiStore {
         expiresAt: d.session?.expiresAt || null,
         policyVersion: d.privacyPolicyVersion || null,
         mailEnabled: Boolean(d.mailEnabled),
+        demoAccounts: Boolean(d.demoAccounts),
         events: d.events || [],
         organizations: d.organizations || [],
         volonteers: d.volonteers || [],
@@ -185,6 +187,7 @@ export class ApiStore {
   getPolicyVersion() { return this.state.policyVersion; }
   /** Настроена ли на сервере отправка писем (иначе «Забыли пароль?» и подтверждение почты скрыты). */
   isMailEnabled() { return this.state.mailEnabled; }
+  isDemoEnabled() { return this.state.demoAccounts; }
 
   /** Все данные пользователя о нём самом (JSON-текст) — право на доступ к данным. */
   async exportMyData() {

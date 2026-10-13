@@ -6,9 +6,10 @@ import { useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
 import { PrivacyPolicyText } from '../components/PrivacyPolicy.jsx';
 
-// Демо-профили показываются только в режиме разработки (npm run dev) и в сборках с VITE_DEMO_ACCOUNTS=true.
+// Демо-профили показываются, если сервер сообщил demoAccounts (не production и выполнен `seed`),
+// а также в режиме разработки (npm run dev) и в сборках с VITE_DEMO_ACCOUNTS=true.
 // Эти учётные записи создаёт `volontiers-server seed`; в production сид запрещён.
-const SHOW_DEMO = Boolean(import.meta.env?.DEV) || import.meta.env?.VITE_DEMO_ACCOUNTS === 'true';
+const FORCE_DEMO = Boolean(import.meta.env?.DEV) || import.meta.env?.VITE_DEMO_ACCOUNTS === 'true';
 
 const DEMO_ACCOUNTS = [
   { email: 'admin@donstu.ru', pass: 'admin123', label: 'Администратор', icon: 'shield' },
@@ -21,6 +22,7 @@ export function LoginModal({ onClose, onAuthenticated }) {
   const { showToast, openModal } = useUI();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const SHOW_DEMO = FORCE_DEMO || store.isDemoEnabled();
 
   const submit = async () => {
     const res = await store.login(email, password);

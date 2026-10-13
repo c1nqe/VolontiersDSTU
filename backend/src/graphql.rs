@@ -17,6 +17,14 @@ impl Query {
     async fn privacy_policy_version(&self) -> &'static str { svc::PRIVACY_POLICY_VERSION }
     /// Настроена ли отправка писем (восстановление пароля, подтверждение почты).
     async fn mail_enabled(&self, ctx: &Context<'_>) -> bool { crate::svc::st(ctx).mailer.enabled() }
+    /// Включён ли демо-режим: сервер не в production и демо-администратор из `seed` существует.
+    /// Фронтенд по этому флагу показывает кнопки входа под демо-профилями.
+    async fn demo_accounts(&self, ctx: &Context<'_>) -> bool {
+        let s = crate::svc::st(ctx);
+        !s.cfg.production
+            && sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = 'admin@donstu.ru' AND deleted_at IS NULL)")
+                .fetch_one(&s.pool).await.unwrap_or(false)
+    }
     /// Список учётных записей — только администратор.
     async fn users(&self, ctx: &Context<'_>) -> Result<Vec<User>> { Ok(svc::users_list(ctx).await?) }
 

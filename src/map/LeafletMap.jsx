@@ -57,6 +57,7 @@ export default function LeafletMap({ markers, onMapClick, focus, placing = false
         attribution={TILES.attribution}
         url={TILES.url}
         maxZoom={TILES.maxZoom}
+        referrerPolicy="strict-origin-when-cross-origin"
       />
       <ClickHandler onMapClick={onMapClick} />
       <FocusController focus={focus} markerRefs={markerRefs} />

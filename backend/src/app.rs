@@ -178,7 +178,7 @@ pub fn router(state: AppState) -> Router {
     app.layer(RequestBodyLimitLayer::new(cfg.max_body_bytes))
         .layer(hdr("x-content-type-options", "nosniff"))
         .layer(hdr("x-frame-options", "DENY"))
-        .layer(hdr("referrer-policy", "same-origin"))
+        .layer(hdr("referrer-policy", "strict-origin-when-cross-origin"))
         .layer(hdr("permissions-policy", "camera=(), microphone=(), geolocation=()"))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("content-security-policy"), csp))
         .layer(TraceLayer::new_for_http())

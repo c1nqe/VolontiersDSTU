@@ -101,7 +101,8 @@ async fn org_and_vol_ids(env: &Env) -> (String, String) {
 #[tokio::test]
 async fn guest_sees_only_public_data() {
     let env = Env::new().await;
-    let d = env.ok(None, "{ events { status } organizations { name email phone contactPerson } requests { id } volonteers { id } me { id } }", json!({})).await;
+    let d = env.ok(None, "{ events { status } organizations { name email phone contactPerson } requests { id } volonteers { id } me { id } demoAccounts }", json!({})).await;
+    assert_eq!(d["demoAccounts"], true, "вне production и после seed демо-режим включён");
     assert!(d["events"].as_array().unwrap().iter().all(|e| matches!(e["status"].as_str().unwrap(), "ACCEPTED" | "CLOSED")), "гость не должен видеть DRAFT");
     assert!(d["organizations"].as_array().unwrap().iter().all(|o| o["email"].is_null() && o["phone"].is_null() && o["contactPerson"].is_null()));
     assert_eq!(d["requests"].as_array().unwrap().len(), 0);
@@ -494,6 +495,8 @@ async fn http_hardening() {
     let res = env.app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.headers()["cache-control"], "no-store");
     assert_eq!(res.headers()["x-frame-options"], "DENY");
+    // OpenStreetMap блокирует запросы плиток без Referer, поэтому при переходе на другой сайт отправляется хотя бы origin
+    assert_eq!(res.headers()["referrer-policy"], "strict-origin-when-cross-origin");
     assert!(res.headers()["content-security-policy"].to_str().unwrap().contains("default-src 'self'"));
     // мусорный UUID → понятная ошибка ввода, а не 500
     let (_, code) = env.err(None, "{ event(id:\"not-a-uuid\") { id } }", json!({})).await;

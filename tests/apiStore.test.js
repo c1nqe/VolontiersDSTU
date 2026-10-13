@@ -200,6 +200,16 @@ describe('ApiStore: почта и восстановление пароля', ()
     expect(on.isMailEnabled()).toBe(true);
   });
 
+  it('флаг demoAccounts приходит с сервера и по умолчанию выключен', async () => {
+    const off = new ApiStore({ client: fakeClient(), storage: memoryStorage() });
+    await off.init();
+    expect(off.isDemoEnabled()).toBe(false);
+    const client = vi.fn(async (q) => (q === HYDRATE_QUERY ? { ...structuredClone(SNAPSHOT), demoAccounts: true } : {}));
+    const on = new ApiStore({ client, storage: memoryStorage() });
+    await on.init();
+    expect(on.isDemoEnabled()).toBe(true);
+  });
+
   it('отправляет запросы с нужными переменными', async () => {
     const client = fakeClient();
     const store = new ApiStore({ client, storage: memoryStorage() });
