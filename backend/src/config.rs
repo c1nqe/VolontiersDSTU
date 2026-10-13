@@ -50,8 +50,8 @@ pub struct Config {
     pub map_tile_hosts: Vec<String>,
 }
 
-/// Источники плиток по умолчанию: стандартная карта OpenStreetMap и CARTO.
-pub const DEFAULT_TILE_HOSTS: [&str; 2] = ["https://*.tile.openstreetmap.org", "https://*.basemaps.cartocdn.com"];
+/// Источники плиток по умолчанию: стандартная карта OpenStreetMap, CARTO и Tracestrack (русские подписи).
+pub const DEFAULT_TILE_HOSTS: [&str; 3] = ["https://*.tile.openstreetmap.org", "https://*.basemaps.cartocdn.com", "https://tile.tracestrack.com"];
 
 /// Допускаются только адреса вида `https://host` или `https://*.host[:порт]` — без путей, пробелов и `;`,
 /// чтобы значение из окружения нельзя было использовать для подмены остальных директив CSP.

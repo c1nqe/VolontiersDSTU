@@ -95,7 +95,7 @@ npm run dev
 | Команда | Что делает |
 |---------|-----------|
 | `npm run dev` | Сервер разработки на порту 3000 с мгновенным обновлением при правках |
-| `npm run build` | Production-сборка в папку `dist/` (источник плиток карты — переменные `VITE_TILE_URL`, `VITE_TILE_ATTRIBUTION`, `VITE_TILE_MAX_ZOOM`) |
+| `npm run build` | Production-сборка в папку `dist/` (источник плиток карты — `VITE_TILE_PROVIDER`/`VITE_TILE_KEY` для русской карты, либо `VITE_TILE_URL`, `VITE_TILE_ATTRIBUTION`, `VITE_TILE_MAX_ZOOM`) |
 | `npm run preview` | Локальный просмотр production-сборки |
 | `npm test` | Автотесты фронтенда (Vitest) |
 | `cd backend && cargo run` | Сервер (по умолчанию `serve`); также `migrate`, `seed [--reset]`, `create-admin`, `purge-audit <дней>`, `schema` |
@@ -257,6 +257,7 @@ cd backend && TEST_DATABASE_URL=postgres://volontiers:volontiers_dev@127.0.0.1:5
 | Карта серая, без улиц | Нет доступа к тайлам OpenStreetMap (сеть или прокси). Метки и остальные функции продолжают работать. |
 | На карте плитки «403 Access blocked … tile usage policy» | OpenStreetMap требует, чтобы запрос плиток приходил с заголовком Referer. С версии 0.5.5 сервер отдаёт `Referrer-Policy: strict-origin-when-cross-origin`, а слой карты задаёт то же правило; обновите код, выполните `npm run build` и перезапустите сервер (Ctrl+F5 в браузере). |
 | Метка не ставится по клику на карту | Нажмите кнопку «Поставить метку» над картой: клик по карте создаёт метку только в этом режиме. Выйти из режима — Esc. |
+| Хочу карту с подписями на русском | Зарегистрируйтесь на [tracestrack.com](https://www.tracestrack.com/) (бесплатный тариф для некоммерческих проектов), создайте ключ и положите в корень проекта файл `.env.local` (он не попадает в git): `VITE_TILE_PROVIDER=tracestrack-ru` и `VITE_TILE_KEY=ваш_ключ`. Затем `npm run build` и перезапуск сервера. Сервер уже разрешает `tile.tracestrack.com` в CSP; если задан свой `MAP_TILE_HOSTS`, добавьте этот адрес. |
 | Своя карта (другие плитки) не показывается | Адрес плиток нужно указать и при сборке фронтенда (`VITE_TILE_URL`, он должен начинаться с `https://` и содержать `{z}/{x}/{y}`), и на сервере в `MAP_TILE_HOSTS` в `backend/.env`; иначе CSP заблокирует загрузку. |
 | Данные «сломались» после экспериментов | `cd backend && cargo run -- seed --reset` вернёт демо-данные. |
 
