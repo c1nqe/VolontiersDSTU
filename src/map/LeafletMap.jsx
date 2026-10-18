@@ -40,6 +40,13 @@ function ResizeWatcher() {
   return null;
 }
 
+/** Убирает служебный префикс из подписи карты; обязательные подписи данных (OpenStreetMap и др.) остаются. */
+function NoMapPrefix() {
+  const map = useMap();
+  useEffect(() => { map.attributionControl?.setPrefix(false); }, [map]);
+  return null;
+}
+
 /** MapContainer читает className только при создании, поэтому класс режима переключаем на самом контейнере. */
 function PlacingCursor({ placing }) {
   const map = useMap();
@@ -73,6 +80,7 @@ export default function LeafletMap({ markers, onMapClick, focus, placing = false
       <FocusController focus={focus} markerRefs={markerRefs} />
       <ResizeWatcher />
       <PlacingCursor placing={placing} />
+      <NoMapPrefix />
 
       {markers.map((m) => {
         const color = getMarkerColor(m);
