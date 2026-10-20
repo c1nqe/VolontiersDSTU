@@ -79,11 +79,12 @@ pub struct Mutation;
 impl Mutation {
     // ----- Аутентификация -----
     /// Регистрация волонтёра или организатора. `consent` — согласие на обработку персональных данных (обязательно).
-    /// Для организатора можно указать название организации. Один человек — одна учётная запись:
+    /// Для организатора можно указать название организации; ИНН организатору обязателен (10 или 12 цифр с контрольными).
+    /// Один человек — одна учётная запись:
     /// телефон уникален, второй аккаунт (в том числе в другой роли) на тот же номер не создаётся.
     #[allow(clippy::too_many_arguments)]
-    async fn register(&self, ctx: &Context<'_>, first_name: String, last_name: String, email: String, phone: String, password: String, role: UserRole, consent: bool, organization_name: Option<String>) -> Result<AuthPayload> {
-        Ok(svc::register(ctx, &first_name, &last_name, &email, &phone, &password, role, consent, organization_name).await?)
+    async fn register(&self, ctx: &Context<'_>, first_name: String, last_name: String, email: String, phone: String, password: String, role: UserRole, consent: bool, organization_name: Option<String>, inn: Option<String>) -> Result<AuthPayload> {
+        Ok(svc::register(ctx, &first_name, &last_name, &email, &phone, &password, role, consent, organization_name, inn).await?)
     }
     async fn login(&self, ctx: &Context<'_>, email: String, password: String) -> Result<AuthPayload> {
         Ok(svc::login(ctx, &email, &password).await?)

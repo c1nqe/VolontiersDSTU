@@ -252,12 +252,12 @@ describe('ApiStore: отмена, регистрация и персональн
     const client = fakeClient({ register: () => ({ register: { user: SNAPSHOT.me, expiresAt: 'x' } }) });
     const store = new ApiStore({ client, storage: memoryStorage() });
     await store.init();
-    const base = { firstName: 'А', lastName: 'Б', email: 'a@b.ru', phone: ' +7 900 123-45-67 ', password: 'Str0ng-pass', consent: true, organizationName: ' Клуб ' };
+    const base = { firstName: 'А', lastName: 'Б', email: 'a@b.ru', phone: ' +7 900 123-45-67 ', password: 'Str0ng-pass', consent: true, organizationName: ' Клуб ', inn: ' 6164 998 212 ' };
     await store.register({ ...base, role: 'ORGANIZER' });
     await store.register({ ...base, role: 'VOLUNTEER' });
     const sent = client.calls.filter((c) => c.query.includes('register(')).map((c) => c.variables);
-    expect(sent[0]).toMatchObject({ role: 'ORGANIZER', consent: true, organizationName: 'Клуб', phone: '+7 900 123-45-67' });
-    expect(sent[1]).toMatchObject({ role: 'VOLUNTEER', consent: true, organizationName: null, phone: '+7 900 123-45-67' });
+    expect(sent[0]).toMatchObject({ role: 'ORGANIZER', consent: true, organizationName: 'Клуб', phone: '+7 900 123-45-67', inn: '6164998212' });
+    expect(sent[1]).toMatchObject({ role: 'VOLUNTEER', consent: true, organizationName: null, phone: '+7 900 123-45-67', inn: null });
   });
 
   it('запросы на отмену событий видны администратору, решения уходят на сервер', async () => {

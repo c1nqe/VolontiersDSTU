@@ -34,8 +34,8 @@ mutation Login($email: String!, $password: String!) {
   login(email: $email, password: $password) { user { id firstName lastName email role } expiresAt }
 }
 # consent — согласие на обработку персональных данных (обязательно); organizationName — для организатора
-mutation Register($firstName: String!, $lastName: String!, $email: String!, $phone: String!, $password: String!, $role: UserRole!, $consent: Boolean!, $organizationName: String) {
-  register(firstName: $firstName, lastName: $lastName, email: $email, phone: $phone, password: $password, role: $role, consent: $consent, organizationName: $organizationName) {
+mutation Register($firstName: String!, $lastName: String!, $email: String!, $phone: String!, $password: String!, $role: UserRole!, $consent: Boolean!, $organizationName: String, $inn: String) {
+  register(firstName: $firstName, lastName: $lastName, email: $email, phone: $phone, password: $password, role: $role, consent: $consent, organizationName: $organizationName, inn: $inn) {
     user { id role } expiresAt
   }
 }

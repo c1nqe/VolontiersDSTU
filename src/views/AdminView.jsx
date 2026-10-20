@@ -309,7 +309,7 @@ export default function AdminView() {
           </Field>
           <div className="form-row">
             <Field label="Контактное лицо" required><input className="form-input" required placeholder="ФИО координатора" {...orgForm.bind('contactPerson')} /></Field>
-            <Field label="ИНН / ОГРН"><input className="form-input" placeholder="6165033140" {...orgForm.bind('inn')} /></Field>
+            <Field label="ИНН"><input className="form-input" inputMode="numeric" maxLength={16} placeholder="6164998212" {...orgForm.bind('inn')} /></Field>
           </div>
           <div className="form-row">
             <Field label="Email для связи" required><input type="email" className="form-input" required placeholder="volunteers@donstu.ru" {...orgForm.bind('email')} /></Field>

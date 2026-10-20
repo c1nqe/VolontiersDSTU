@@ -88,6 +88,18 @@ pub fn normalize_phone(p: &str) -> AppResult<String> {
     let d = if d.len() == 11 && d.starts_with('8') { format!("7{}", &d[1..]) } else if d.len() == 10 { format!("7{d}") } else { d };
     if (10..=15).contains(&d.len()) { Ok(format!("+{d}")) } else { Err(AppError::validation("Укажите корректный номер телефона, например +7 (900) 123-45-67")) }
 }
+/// ИНН: 10 цифр (организация) или 12 (ИП, физическое лицо) с верными контрольными цифрами.
+pub fn validate_inn(raw: &str) -> AppResult<String> {
+    let inn: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    let d: Vec<u32> = inn.chars().filter_map(|c| c.to_digit(10)).collect();
+    let check = |w: &[u32]| w.iter().zip(&d).map(|(a, b)| a * b).sum::<u32>() % 11 % 10;
+    let ok = d.len() == inn.chars().count() && match d.len() {
+        10 => check(&[2, 4, 10, 3, 5, 9, 4, 6, 8]) == d[9],
+        12 => check(&[7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) == d[10] && check(&[3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) == d[11],
+        _ => false,
+    };
+    if ok { Ok(inn) } else { Err(AppError::validation("Укажите корректный ИНН: 10 цифр для организации или 12 для ИП и физического лица (проверьте контрольные цифры)")) }
+}
 const PHONE_TAKEN: &str = "Этот номер телефона уже привязан к другой учётной записи. Один человек может иметь только одну учётную запись — войдите в неё или восстановите пароль.";
 
 /// phone — нормализованный номер; в БД сравнивается только его слепой индекс.
@@ -365,7 +377,7 @@ pub async fn login(ctx: &Context<'_>, email: &str, password: &str) -> AppResult<
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, phone: &str, password: &str, role: UserRole, consent: bool, organization_name: Option<String>) -> AppResult<AuthPayload> {
+pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, phone: &str, password: &str, role: UserRole, consent: bool, organization_name: Option<String>, inn: Option<String>) -> AppResult<AuthPayload> {
     rate_limit(ctx, "register", 10)?;
     if !consent {
         return Err(AppError::validation("Для регистрации необходимо согласие на обработку персональных данных"));
@@ -378,6 +390,11 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
     let email = normalize_email(email)?;
     let phone_display = clean(phone, "Телефон", 1, 40)?;
     let phone = normalize_phone(&phone_display)?;
+    // ИНН обязателен организатору: по нему администратор проверяет организацию
+    let inn = match role {
+        UserRole::Organizer => Some(validate_inn(inn.as_deref().unwrap_or_default())?),
+        _ => None,
+    };
     auth::validate_password(password, &email)?;
     let pool = &st(ctx).pool;
     let email_hash = crypto::email_index(&email);
@@ -414,8 +431,8 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
                 name = format!("{name} №{}", &Uuid::new_v4().simple().to_string()[..6]);
             }
             org = Some(sqlx::query_scalar(
-                "INSERT INTO organizations (name, contact_person, email, phone, description) VALUES ($1,$2,$3,$4,'Новый организатор социально-волонтёрских инициатив') RETURNING id",
-            ).bind(&name).bind(format!("{last} {first}")).bind(crypto::seal(&email)).bind(crypto::seal(&phone_display)).fetch_one(&mut *tx).await?);
+                "INSERT INTO organizations (name, contact_person, email, phone, inn, description) VALUES ($1,$2,$3,$4,$5,'Новый организатор социально-волонтёрских инициатив') RETURNING id",
+            ).bind(&name).bind(format!("{last} {first}")).bind(crypto::seal(&email)).bind(crypto::seal(&phone_display)).bind(&inn).fetch_one(&mut *tx).await?);
         }
         UserRole::Admin => unreachable!(),
     }
@@ -497,12 +514,7 @@ pub async fn register_organization(ctx: &Context<'_>, name: &str, contact: &str,
     let contact = clean(contact, "Контактное лицо", 1, 200)?;
     let email = normalize_email(email)?;
     let phone = clean(phone, "Телефон", 1, 40)?;
-    let inn = clean_opt(&inn, "ИНН", 12)?;
-    if let Some(i) = &inn {
-        if !(i.chars().all(|c| c.is_ascii_digit()) && (i.len() == 10 || i.len() == 12)) {
-            return Err(AppError::validation("ИНН должен состоять из 10 или 12 цифр"));
-        }
-    }
+    let inn = clean_opt(&inn, "ИНН", 20)?.map(|i| validate_inn(&i)).transpose()?;
     let description = clean_opt(&description, "Описание", 2000)?;
     let mut tx = st(ctx).pool.begin().await?;
     let row = sqlx::query_as::<_, OrganizationRow>(
@@ -1358,3 +1370,27 @@ pub async fn delete_my_account(ctx: &Context<'_>, password: &str) -> AppResult<b
 
 #[allow(dead_code)]
 fn _unused(_: ID) {}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_phone, validate_inn};
+
+    #[test]
+    fn inn_formats_and_check_digits() {
+        for ok in ["6164998212", "7707083893", " 6164 998 212 ", "500100732259"] {
+            assert!(validate_inn(ok).is_ok(), "{ok}");
+        }
+        assert_eq!(validate_inn(" 6164 998 212 ").unwrap(), "6164998212");
+        for bad in ["", "12345", "6165033141", "61649982a2", "61649982120", "500100732258", "6164998213"] {
+            assert!(validate_inn(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn phones_are_normalized() {
+        for p in ["+7 (900) 555-00-01", "8 900 555 00 01", "9005550001", "+7(900)5550001"] {
+            assert_eq!(normalize_phone(p).unwrap(), "+79005550001", "{p}");
+        }
+        assert!(normalize_phone("12345").is_err());
+    }
+}

@@ -78,7 +78,7 @@ const ROLES = [
 export function RegisterModal({ onClose, onAuthenticated }) {
   const store = useStore();
   const { showToast, openModal } = useUI();
-  const [form, setForm] = useState({ role: 'VOLUNTEER', firstName: '', lastName: '', email: '', phone: '', password: '', organizationName: '', consent: false });
+  const [form, setForm] = useState({ role: 'VOLUNTEER', firstName: '', lastName: '', email: '', phone: '', password: '', organizationName: '', inn: '', consent: false });
   const bind = (k) => ({ value: form[k], onChange: (e) => setForm((f) => ({ ...f, [k]: e.target.value })) });
 
   const submit = async () => {
@@ -126,6 +126,21 @@ export function RegisterModal({ onClose, onAuthenticated }) {
       {form.role === 'ORGANIZER' && (
         <Field label="Название организации" hint="Оставьте пустым, чтобы указать позже. Организация видна всем в карточках событий.">
           <input className="form-input" maxLength={200} placeholder="Например: Клуб «Добрые руки»" {...bind('organizationName')} />
+        </Field>
+      )}
+      {form.role === 'ORGANIZER' && (
+        <Field label="ИНН" required hint="10 цифр для организации или 12 для ИП и физического лица. Видят только администраторы и вы.">
+          <input
+            className="form-input"
+            required
+            inputMode="numeric"
+            autoComplete="off"
+            pattern="\s*(\d\s*){10}|\s*(\d\s*){12}"
+            title="10 или 12 цифр"
+            maxLength={16}
+            placeholder="6164998212"
+            {...bind('inn')}
+          />
         </Field>
       )}
       <Field label="Электронная почта" required>

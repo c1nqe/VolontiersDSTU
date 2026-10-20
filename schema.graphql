@@ -139,10 +139,11 @@ enum MapMarkerType {
 type Mutation {
 	"""
 	Регистрация волонтёра или организатора. `consent` — согласие на обработку персональных данных (обязательно).
-	Для организатора можно указать название организации. Один человек — одна учётная запись:
+	Для организатора можно указать название организации; ИНН организатору обязателен (10 или 12 цифр с контрольными).
+	Один человек — одна учётная запись:
 	телефон уникален, второй аккаунт (в том числе в другой роли) на тот же номер не создаётся.
 	"""
-	register(firstName: String!, lastName: String!, email: String!, phone: String!, password: String!, role: UserRole!, consent: Boolean!, organizationName: String): AuthPayload!
+	register(firstName: String!, lastName: String!, email: String!, phone: String!, password: String!, role: UserRole!, consent: Boolean!, organizationName: String, inn: String): AuthPayload!
 	login(email: String!, password: String!): AuthPayload!
 	"""
 	Завершает все сессии пользователя (token_version++), очищает cookie.

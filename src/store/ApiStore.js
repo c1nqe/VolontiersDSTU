@@ -165,15 +165,17 @@ export class ApiStore {
   /**
    * consent — согласие на обработку персональных данных (обязательно); organizationName — только для организатора.
    * phone обязателен: один человек — одна учётная запись, второй аккаунт на тот же номер сервер не создаст.
+   * inn обязателен организатору (10 или 12 цифр), волонтёру не передаётся.
    */
-  async register({ firstName, lastName, email, phone, password, role, consent, organizationName }) {
+  async register({ firstName, lastName, email, phone, password, role, consent, organizationName, inn }) {
     if (!consent) return { success: false, message: 'Для регистрации необходимо согласие на обработку персональных данных' };
     const res = await this.mutate(
-      `mutation($firstName:String!,$lastName:String!,$email:String!,$phone:String!,$password:String!,$role:UserRole!,$consent:Boolean!,$organizationName:String){
-        register(firstName:$firstName,lastName:$lastName,email:$email,phone:$phone,password:$password,role:$role,consent:$consent,organizationName:$organizationName){ user { ${USER} } expiresAt } }`,
+      `mutation($firstName:String!,$lastName:String!,$email:String!,$phone:String!,$password:String!,$role:UserRole!,$consent:Boolean!,$organizationName:String,$inn:String){
+        register(firstName:$firstName,lastName:$lastName,email:$email,phone:$phone,password:$password,role:$role,consent:$consent,organizationName:$organizationName,inn:$inn){ user { ${USER} } expiresAt } }`,
       {
         firstName, lastName, email: String(email).trim(), phone: String(phone || '').trim(), password, role, consent: true,
         organizationName: role === 'ORGANIZER' ? (String(organizationName || '').trim() || null) : null,
+        inn: role === 'ORGANIZER' ? (String(inn || '').replace(/\s+/g, '') || null) : null,
       },
       'register',
     );
