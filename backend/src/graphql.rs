@@ -79,10 +79,11 @@ pub struct Mutation;
 impl Mutation {
     // ----- Аутентификация -----
     /// Регистрация волонтёра или организатора. `consent` — согласие на обработку персональных данных (обязательно).
-    /// Для организатора можно указать название организации.
+    /// Для организатора можно указать название организации. Один человек — одна учётная запись:
+    /// телефон уникален, второй аккаунт (в том числе в другой роли) на тот же номер не создаётся.
     #[allow(clippy::too_many_arguments)]
-    async fn register(&self, ctx: &Context<'_>, first_name: String, last_name: String, email: String, password: String, role: UserRole, consent: bool, organization_name: Option<String>) -> Result<AuthPayload> {
-        Ok(svc::register(ctx, &first_name, &last_name, &email, &password, role, consent, organization_name).await?)
+    async fn register(&self, ctx: &Context<'_>, first_name: String, last_name: String, email: String, phone: String, password: String, role: UserRole, consent: bool, organization_name: Option<String>) -> Result<AuthPayload> {
+        Ok(svc::register(ctx, &first_name, &last_name, &email, &phone, &password, role, consent, organization_name).await?)
     }
     async fn login(&self, ctx: &Context<'_>, email: String, password: String) -> Result<AuthPayload> {
         Ok(svc::login(ctx, &email, &password).await?)
@@ -137,9 +138,19 @@ impl Mutation {
     async fn confirm_volunteer_work(&self, ctx: &Context<'_>, request_id: ID, confirmed_hours: f64) -> Result<VolonteerEventRequest> {
         Ok(svc::confirm_work(ctx, parse_id(&request_id)?, confirmed_hours).await?)
     }
-    /// DRAFT | ACCEPTED → CANCELLED. Заявки принятого события отменяются автоматически.
+    /// Администратор: DRAFT | ACCEPTED → CANCELLED сразу. Организатор (только своей организации): черновик снимается сразу,
+    /// принятое событие — запрос на отмену (обязательна причина), который согласует администратор.
+    /// Заявки отменённого события отменяются автоматически.
     async fn cancel_event(&self, ctx: &Context<'_>, event_id: ID, reason: Option<String>) -> Result<Event> {
         Ok(svc::cancel_event(ctx, parse_id(&event_id)?, reason).await?)
+    }
+    /// Администратор согласует запрос организатора на отмену: ACCEPTED → CANCELLED.
+    async fn approve_event_cancellation(&self, ctx: &Context<'_>, event_id: ID) -> Result<Event> {
+        Ok(svc::approve_event_cancellation(ctx, parse_id(&event_id)?).await?)
+    }
+    /// Администратор отклоняет запрос на отмену: событие остаётся в силе.
+    async fn reject_event_cancellation(&self, ctx: &Context<'_>, event_id: ID) -> Result<Event> {
+        Ok(svc::reject_event_cancellation(ctx, parse_id(&event_id)?).await?)
     }
     /// ACCEPTED → CLOSED
     async fn close_event(&self, ctx: &Context<'_>, event_id: ID) -> Result<Event> { Ok(svc::close_event(ctx, parse_id(&event_id)?).await?) }

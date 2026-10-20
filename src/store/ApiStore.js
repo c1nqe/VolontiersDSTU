@@ -17,7 +17,7 @@ export { MAX_MARKER_PHOTOS, MAX_REVIEW_LENGTH } from './constants.js';
 const UI_KEY = 'volontiers_ui_v2';
 
 const USER = 'id firstName lastName email role createdAt organizationId volonteerId consentAcceptedAt consentVersion emailVerified';
-const EVENT = 'id title description location startDate endDate requiredVolunteers plannedHours status cancelReason organizationId organizationName requestsCount approvedVolunteersCount ratingAvg reviewsCount createdAt';
+const EVENT = 'id title description location startDate endDate requiredVolunteers plannedHours status cancelReason cancelRequestedAt organizationId organizationName requestsCount approvedVolunteersCount ratingAvg reviewsCount createdAt';
 const ORG = 'id name inn contactPerson email phone description createdAt';
 const VOL = 'id fullName firstName lastName email phone birthDate studentId faculty totalConfirmedHours createdAt';
 const REQ = 'id volonteerId volonteerName volonteerFaculty volonteerStudentId eventId eventTitle eventDate eventStatus organizationName status requestedHours confirmedHours rejectionReason createdAt updatedAt';
@@ -162,14 +162,17 @@ export class ApiStore {
     return res.success ? { success: true, user: normalizeUser(res.data.user) } : res;
   }
 
-  /** consent — согласие на обработку персональных данных (обязательно); organizationName — только для организатора. */
-  async register({ firstName, lastName, email, password, role, consent, organizationName }) {
+  /**
+   * consent — согласие на обработку персональных данных (обязательно); organizationName — только для организатора.
+   * phone обязателен: один человек — одна учётная запись, второй аккаунт на тот же номер сервер не создаст.
+   */
+  async register({ firstName, lastName, email, phone, password, role, consent, organizationName }) {
     if (!consent) return { success: false, message: 'Для регистрации необходимо согласие на обработку персональных данных' };
     const res = await this.mutate(
-      `mutation($firstName:String!,$lastName:String!,$email:String!,$password:String!,$role:UserRole!,$consent:Boolean!,$organizationName:String){
-        register(firstName:$firstName,lastName:$lastName,email:$email,password:$password,role:$role,consent:$consent,organizationName:$organizationName){ user { ${USER} } expiresAt } }`,
+      `mutation($firstName:String!,$lastName:String!,$email:String!,$phone:String!,$password:String!,$role:UserRole!,$consent:Boolean!,$organizationName:String){
+        register(firstName:$firstName,lastName:$lastName,email:$email,phone:$phone,password:$password,role:$role,consent:$consent,organizationName:$organizationName){ user { ${USER} } expiresAt } }`,
       {
-        firstName, lastName, email: String(email).trim(), password, role, consent: true,
+        firstName, lastName, email: String(email).trim(), phone: String(phone || '').trim(), password, role, consent: true,
         organizationName: role === 'ORGANIZER' ? (String(organizationName || '').trim() || null) : null,
       },
       'register',
@@ -365,13 +368,29 @@ export class ApiStore {
     );
   }
 
-  /** DRAFT | ACCEPTED → CANCELLED; заявки принятого события сервер отменяет автоматически. */
+  /**
+   * Администратор: DRAFT | ACCEPTED → CANCELLED сразу. Организатор: черновик снимается сразу,
+   * принятое событие — запрос на отмену (cancelRequestedAt), который согласует администратор.
+   */
   cancelEvent(eventId, reason = null) {
     return this.mutate(
-      'mutation($eventId:ID!,$reason:String){ cancelEvent(eventId:$eventId,reason:$reason){ id status cancelReason } }',
+      'mutation($eventId:ID!,$reason:String){ cancelEvent(eventId:$eventId,reason:$reason){ id status cancelReason cancelRequestedAt } }',
       { eventId, reason: reason ? String(reason).trim() || null : null },
       'cancelEvent',
     );
+  }
+
+  /** Принятые события, отмену которых запросил организатор (для администратора). */
+  getCancellationRequests() {
+    return this.state.events.filter((e) => e.cancelRequestedAt && e.status === 'ACCEPTED');
+  }
+
+  approveEventCancellation(eventId) {
+    return this.mutate('mutation($eventId:ID!){ approveEventCancellation(eventId:$eventId){ id status } }', { eventId }, 'approveEventCancellation');
+  }
+
+  rejectEventCancellation(eventId) {
+    return this.mutate('mutation($eventId:ID!){ rejectEventCancellation(eventId:$eventId){ id status } }', { eventId }, 'rejectEventCancellation');
   }
 
   closeEvent(eventId) {

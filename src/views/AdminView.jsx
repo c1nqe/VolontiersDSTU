@@ -29,6 +29,7 @@ export default function AdminView() {
   const events = store.getEvents();
   const pendingEvents = events.filter((e) => e.status === 'DRAFT');
   const activeEvents = events.filter((e) => e.status === 'ACCEPTED');
+  const cancelRequests = store.getCancellationRequests();
   const pendingMarkers = store.getPendingMarkerApprovals();
   const photoQueue = store.getPhotoQueue();
   const allReviews = store.getAllReviews();
@@ -36,6 +37,7 @@ export default function AdminView() {
 
   const tabs = [
     { id: 'moderation', label: 'Модерация событий', icon: 'shield', count: pendingEvents.length },
+    { id: 'cancellations', label: 'Отмена событий', icon: 'cross', count: cancelRequests.length },
     { id: 'markers', label: 'Закрытие ПСО', icon: 'camera', count: pendingMarkers.length },
     { id: 'photos', label: 'Фото меток', icon: 'image', count: photoQueue.length },
     { id: 'reviews', label: 'Отзывы', icon: 'message', count: 0 },
@@ -43,6 +45,12 @@ export default function AdminView() {
     { id: 'reg-vol', label: 'Новый волонтёр', icon: 'user' },
     { id: 'registry', label: 'Общий реестр', icon: 'fileText' },
   ];
+
+  const approveCancel = (evt) => {
+    if (!window.confirm(`Отменить событие «${evt.title}»? Все заявки волонтёров будут отменены, участники получат уведомление.`)) return;
+    run(store.approveEventCancellation(evt.id), 'Событие отменено по запросу организатора.', 'info');
+  };
+  const rejectCancel = (evt) => run(store.rejectEventCancellation(evt.id), 'Запрос отклонён: событие остаётся в силе.');
 
   const approveMarker = (m) => run(store.approveMarkerClose(m.id), 'Завершение поисковой операции одобрено. Метка, фото и отчёт удалены из системы.');
 
@@ -120,6 +128,41 @@ export default function AdminView() {
                 ))}
               </div>
             </>
+          )}
+        </>
+      )}
+
+      {tab === 'cancellations' && (
+        <>
+          <SectionHeader
+            title="Запросы организаторов на отмену событий"
+            description="Организатор не может сам отменить опубликованное событие. При согласовании событие и все заявки волонтёров отменяются, при отклонении событие остаётся в силе."
+          >
+            <span className="badge badge-pending">{cancelRequests.length} {pluralize(cancelRequests.length, 'запрос', 'запроса', 'запросов')}</span>
+          </SectionHeader>
+          {cancelRequests.length === 0 ? (
+            <EmptyState icon="check" tone="accent" title="Запросов на отмену нет">Когда организатор попросит отменить событие, запрос появится здесь.</EmptyState>
+          ) : (
+            <div className="cards-grid">
+              {cancelRequests.map((evt) => (
+                <EventCard
+                  key={evt.id}
+                  event={evt}
+                  meta="admin"
+                  footerInfo={`Причина: ${evt.cancelReason || 'не указана'} · заявок: ${evt.requestsCount}`}
+                  actions={(
+                    <>
+                      <button type="button" className="btn btn-outline btn-sm" onClick={() => rejectCancel(evt)}>
+                        <Icon name="cross" /> Отклонить
+                      </button>
+                      <button type="button" className="btn btn-danger btn-sm" onClick={() => approveCancel(evt)}>
+                        <Icon name="check" /> Согласовать отмену
+                      </button>
+                    </>
+                  )}
+                />
+              ))}
+            </div>
           )}
         </>
       )}

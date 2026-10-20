@@ -80,6 +80,25 @@ fn normalize_email(e: &str) -> AppResult<String> {
         && e.split('@').nth(1).map(|d| d.contains('.') && !d.starts_with('.') && !d.ends_with('.')).unwrap_or(false);
     if ok { Ok(e) } else { Err(AppError::validation("Укажите корректный адрес электронной почты")) }
 }
+/// Телефон в виде +7XXXXXXXXXX: по нему проверяется правило «один человек — одна учётная запись».
+/// Российские 8XXXXXXXXXX и 10-значные номера приводятся к +7.
+pub fn normalize_phone(p: &str) -> AppResult<String> {
+    let d: String = p.chars().filter(char::is_ascii_digit).collect();
+    let d = if d.len() == 11 && d.starts_with('8') { format!("7{}", &d[1..]) } else if d.len() == 10 { format!("7{d}") } else { d };
+    if (10..=15).contains(&d.len()) { Ok(format!("+{d}")) } else { Err(AppError::validation("Укажите корректный номер телефона, например +7 (900) 123-45-67")) }
+}
+const PHONE_TAKEN: &str = "Этот номер телефона уже привязан к другой учётной записи. Один человек может иметь только одну учётную запись — войдите в неё или восстановите пароль.";
+
+async fn ensure_phone_free(conn: &mut PgConnection, phone: &str, except_person: Option<Uuid>) -> AppResult<()> {
+    let taken: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM persons WHERE phone = $1 AND ($2::uuid IS NULL OR id <> $2))")
+        .bind(phone).bind(except_person).fetch_one(conn).await?;
+    if taken { Err(AppError::conflict(PHONE_TAKEN)) } else { Ok(()) }
+}
+/// Уникальный индекс persons_phone_uq ловит гонку двух одновременных регистраций.
+fn phone_conflict(e: sqlx::Error) -> AppError {
+    let unique_phone = matches!(&e, sqlx::Error::Database(d) if d.constraint() == Some("persons_phone_uq"));
+    if unique_phone { AppError::conflict(PHONE_TAKEN) } else { AppError::from(e) }
+}
 fn finite(x: f64, field: &str) -> AppResult<f64> {
     if x.is_finite() { Ok(x) } else { Err(AppError::validation(format!("Поле «{field}» должно быть числом"))) }
 }
@@ -336,7 +355,7 @@ pub async fn login(ctx: &Context<'_>, email: &str, password: &str) -> AppResult<
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, password: &str, role: UserRole, consent: bool, organization_name: Option<String>) -> AppResult<AuthPayload> {
+pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, phone: &str, password: &str, role: UserRole, consent: bool, organization_name: Option<String>) -> AppResult<AuthPayload> {
     rate_limit(ctx, "register", 10)?;
     if !consent {
         return Err(AppError::validation("Для регистрации необходимо согласие на обработку персональных данных"));
@@ -347,23 +366,27 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
     let first = clean(first, "Имя", 1, 100)?;
     let last = clean(last, "Фамилия", 1, 100)?;
     let email = normalize_email(email)?;
+    let phone_display = clean(phone, "Телефон", 1, 40)?;
+    let phone = normalize_phone(&phone_display)?;
     auth::validate_password(password, &email)?;
     let pool = &st(ctx).pool;
     let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM users WHERE lower(email) = $1").bind(&email).fetch_optional(pool).await?;
     if exists.is_some() {
         return Err(AppError::conflict("Пользователь с таким адресом электронной почты уже зарегистрирован!"));
     }
+    // один человек — одна учётная запись: нельзя завести второй аккаунт (в другой роли) на тот же телефон
+    ensure_phone_free(&mut *pool.acquire().await?, &phone, None).await?;
     let pw = password.to_string();
     let hash = tokio::task::spawn_blocking(move || auth::hash_password(&pw)).await.map_err(|e| anyhow::anyhow!("join: {e}"))??;
 
     let mut tx = pool.begin().await?;
-    let person_id: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name) VALUES ($1,$2) RETURNING id")
-        .bind(&first).bind(&last).fetch_one(&mut *tx).await?;
+    let person_id: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, phone) VALUES ($1,$2,$3) RETURNING id")
+        .bind(&first).bind(&last).bind(&phone).fetch_one(&mut *tx).await.map_err(phone_conflict)?;
     let (mut org, mut vol): (Option<Uuid>, Option<Uuid>) = (None, None);
     match role {
         UserRole::Volunteer => {
-            vol = Some(sqlx::query_scalar("INSERT INTO volonteers (person_id, email) VALUES ($1,$2) RETURNING id")
-                .bind(person_id).bind(&email).fetch_one(&mut *tx).await.map_err(|e| match AppError::from(e) {
+            vol = Some(sqlx::query_scalar("INSERT INTO volonteers (person_id, email, phone) VALUES ($1,$2,$3) RETURNING id")
+                .bind(person_id).bind(&email).bind(&phone_display).fetch_one(&mut *tx).await.map_err(|e| match AppError::from(e) {
                     AppError::Conflict(_) => AppError::conflict("Волонтёр с таким адресом электронной почты уже существует"),
                     other => other,
                 })?);
@@ -380,8 +403,8 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
                 name = format!("{name} ({email})");
             }
             org = Some(sqlx::query_scalar(
-                "INSERT INTO organizations (name, contact_person, email, description) VALUES ($1,$2,$3,'Новый организатор социально-волонтёрских инициатив') RETURNING id",
-            ).bind(&name).bind(format!("{last} {first}")).bind(&email).fetch_one(&mut *tx).await?);
+                "INSERT INTO organizations (name, contact_person, email, phone, description) VALUES ($1,$2,$3,$4,'Новый организатор социально-волонтёрских инициатив') RETURNING id",
+            ).bind(&name).bind(format!("{last} {first}")).bind(&email).bind(&phone_display).fetch_one(&mut *tx).await?);
         }
         UserRole::Admin => unreachable!(),
     }
@@ -530,6 +553,7 @@ pub async fn register_volonteer(ctx: &Context<'_>, full_name: &str, email: &str,
     let middle = { let rest: Vec<&str> = parts.collect(); if rest.is_empty() { None } else { Some(rest.join(" ")) } };
     let email = normalize_email(email)?;
     let phone = clean(phone, "Телефон", 1, 40)?;
+    let phone_norm = normalize_phone(&phone)?;
     let student_id = clean_opt(&student_id, "Студенческий билет", 40)?;
     let faculty = clean_opt(&faculty, "Факультет", 200)?;
     let birth = match birth_date.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -537,8 +561,9 @@ pub async fn register_volonteer(ctx: &Context<'_>, full_name: &str, email: &str,
         None => None,
     };
     let mut tx = st(ctx).pool.begin().await?;
-    let person_id: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, middle_name, birth_date) VALUES ($1,$2,$3,$4) RETURNING id")
-        .bind(&first).bind(&last).bind(&middle).bind(birth).fetch_one(&mut *tx).await?;
+    ensure_phone_free(&mut tx, &phone_norm, None).await?;
+    let person_id: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, middle_name, birth_date, phone) VALUES ($1,$2,$3,$4,$5) RETURNING id")
+        .bind(&first).bind(&last).bind(&middle).bind(birth).bind(&phone_norm).fetch_one(&mut *tx).await.map_err(phone_conflict)?;
     let id: Uuid = sqlx::query_scalar("INSERT INTO volonteers (person_id, email, phone, student_id, faculty) VALUES ($1,$2,$3,$4,$5) RETURNING id")
         .bind(person_id).bind(&email).bind(&phone).bind(&student_id).bind(&faculty).fetch_one(&mut *tx).await
         .map_err(|e| match AppError::from(e) { AppError::Conflict(_) => AppError::conflict("Волонтёр с таким адресом электронной почты уже существует"), o => o })?;
@@ -560,6 +585,13 @@ pub async fn update_my_profile(ctx: &Context<'_>, first_name: Option<String>, la
     let mut tx = st(ctx).pool.begin().await?;
     sqlx::query("UPDATE persons SET first_name = COALESCE($2, first_name), last_name = COALESCE($3, last_name) WHERE id = (SELECT person_id FROM volonteers WHERE id = $1)")
         .bind(vol_id).bind(&first).bind(&last).execute(&mut *tx).await?;
+    if let Some(p) = &phone {
+        // новый телефон тоже не должен принадлежать другой учётной записи; пустая строка отвязывает номер
+        let norm = if p.is_empty() { None } else { Some(normalize_phone(p)?) };
+        let person: Uuid = sqlx::query_scalar("SELECT person_id FROM volonteers WHERE id = $1").bind(vol_id).fetch_one(&mut *tx).await?;
+        if let Some(n) = &norm { ensure_phone_free(&mut tx, n, Some(person)).await?; }
+        sqlx::query("UPDATE persons SET phone = $2 WHERE id = $1").bind(person).bind(&norm).execute(&mut *tx).await.map_err(phone_conflict)?;
+    }
     // пустая строка очищает необязательное поле, отсутствие аргумента оставляет как есть
     sqlx::query("UPDATE volonteers SET phone = COALESCE($2, phone), faculty = CASE WHEN $3::text IS NULL THEN faculty ELSE NULLIF($3, '') END, student_id = CASE WHEN $4::text IS NULL THEN student_id ELSE NULLIF($4, '') END WHERE id = $1")
         .bind(vol_id).bind(&phone).bind(&faculty).bind(&student).execute(&mut *tx).await?;
@@ -657,7 +689,10 @@ pub async fn moderate_event(ctx: &Context<'_>, id: Uuid, status: EventStatus) ->
         _ => Err(AppError::validation("Модерация допускает только статусы ACCEPTED и CANCELLED")),
     }
 }
-/// Отмена события организатором или администратором: DRAFT → CANCELLED или ACCEPTED → CANCELLED.
+/// Отмена события.
+/// * Организатор отменяет только события своей организации. Черновик (DRAFT) он снимает сам — волонтёры его ещё не видели;
+///   принятое событие (ACCEPTED) отменяется только с согласия администратора: создаётся запрос, событие остаётся в силе.
+/// * Администратор отменяет сразу (DRAFT | ACCEPTED → CANCELLED).
 /// При отмене принятого события все открытые и принятые заявки отменяются каскадом (триггер БД).
 pub async fn cancel_event(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -> AppResult<Event> {
     let v = need(ctx)?;
@@ -665,16 +700,67 @@ pub async fn cancel_event(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -
     let mut tx = st(ctx).pool.begin().await?;
     let org = event_org(&mut tx, id).await?;
     if !v.can_act_for_org(org) { return Err(AppError::Forbidden); }
+    let status: EventStatus = sqlx::query_scalar("SELECT status FROM events WHERE id = $1 FOR UPDATE").bind(id).fetch_one(&mut *tx).await?;
+    if !v.is_admin() && status == EventStatus::Accepted {
+        let reason = reason.ok_or_else(|| AppError::validation("Укажите причину отмены — её увидит администратор"))?;
+        let confirmed: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM volonteer_event_requests WHERE event_id = $1 AND status = 'CONFIRMED')")
+            .bind(id).fetch_one(&mut *tx).await?;
+        if confirmed { return Err(AppError::conflict("Нельзя отменить событие, по которому уже подтверждены часы работы")); }
+        let n = sqlx::query("UPDATE events SET cancel_requested_at = now(), cancel_requested_by = $2, cancel_reason = $3 WHERE id = $1 AND cancel_requested_at IS NULL")
+            .bind(id).bind(v.user_id).bind(&reason).execute(&mut *tx).await?.rows_affected();
+        if n == 0 { return Err(AppError::conflict("Запрос на отмену этого события уже отправлен администратору")); }
+        audit(&mut tx, Some(v), "event.cancel_requested", "event", Some(id), json!({})).await?;
+        let ev = fetch_event(&mut tx, id).await?;
+        tx.commit().await?;
+        return Ok(ev);
+    }
+    let (ev, to_notify) = do_cancel_event(ctx, &mut tx, v, id, reason.as_deref(), "event.cancel").await?;
+    tx.commit().await?;
+    notify_cancelled(ctx, &ev, to_notify);
+    Ok(ev)
+}
+
+fn notify_cancelled(ctx: &Context<'_>, ev: &Event, to: Vec<Recipient>) {
+    send_all(st(ctx), to, |r| crate::mail::event_cancelled_mail(&r.email, &r.first_name, &ev.title, ev.cancel_reason.as_deref()));
+}
+
+/// Перевод в CANCELLED с каскадом заявок; возвращает участников, которым после коммита уходит письмо.
+async fn do_cancel_event(ctx: &Context<'_>, tx: &mut PgConnection, v: &Viewer, id: Uuid, reason: Option<&str>, action: &str) -> AppResult<(Event, Vec<Recipient>)> {
     let affected: i64 = sqlx::query_scalar("SELECT count(*) FROM volonteer_event_requests WHERE event_id = $1 AND status IN ('OPEN','ACCEPTED')")
         .bind(id).fetch_one(&mut *tx).await?;
-    let to_notify = if st(ctx).mailer.enabled() { recipients_open_requests(&mut tx, id).await } else { vec![] };
-    let n = sqlx::query("UPDATE events SET status = 'CANCELLED', cancel_reason = $2 WHERE id = $1 AND status IN ('DRAFT','ACCEPTED')")
-        .bind(id).bind(&reason).execute(&mut *tx).await?.rows_affected();
+    let to_notify = if st(ctx).mailer.enabled() { recipients_open_requests(tx, id).await } else { vec![] };
+    let n = sqlx::query("UPDATE events SET status = 'CANCELLED', cancel_reason = $2, cancel_requested_at = NULL WHERE id = $1 AND status IN ('DRAFT','ACCEPTED')")
+        .bind(id).bind(reason).execute(&mut *tx).await?.rows_affected();
     if n == 0 { return Err(AppError::conflict("Отменить можно только событие в статусе DRAFT или ACCEPTED")); }
-    audit(&mut tx, Some(v), "event.cancel", "event", Some(id), json!({"requestsCancelled": affected, "withReason": reason.is_some()})).await?;
+    audit(tx, Some(v), action, "event", Some(id), json!({"requestsCancelled": affected, "withReason": reason.is_some()})).await?;
+    Ok((fetch_event(tx, id).await?, to_notify))
+}
+
+/// Администратор согласует запрос организатора на отмену принятого события.
+pub async fn approve_event_cancellation(ctx: &Context<'_>, id: Uuid) -> AppResult<Event> {
+    let v = need(ctx)?;
+    if !v.is_admin() { return Err(AppError::Forbidden); }
+    let mut tx = st(ctx).pool.begin().await?;
+    let reason: Option<Option<String>> = sqlx::query_scalar("SELECT cancel_reason FROM events WHERE id = $1 AND cancel_requested_at IS NOT NULL FOR UPDATE")
+        .bind(id).fetch_optional(&mut *tx).await?;
+    let reason = reason.ok_or_else(|| AppError::conflict("Запроса на отмену этого события нет"))?;
+    let (ev, to_notify) = do_cancel_event(ctx, &mut tx, v, id, reason.as_deref(), "event.cancel_approved").await?;
+    tx.commit().await?;
+    notify_cancelled(ctx, &ev, to_notify);
+    Ok(ev)
+}
+
+/// Администратор отклоняет запрос на отмену: событие остаётся в силе, причина запроса стирается.
+pub async fn reject_event_cancellation(ctx: &Context<'_>, id: Uuid) -> AppResult<Event> {
+    let v = need(ctx)?;
+    if !v.is_admin() { return Err(AppError::Forbidden); }
+    let mut tx = st(ctx).pool.begin().await?;
+    let n = sqlx::query("UPDATE events SET cancel_requested_at = NULL, cancel_requested_by = NULL, cancel_reason = NULL WHERE id = $1 AND cancel_requested_at IS NOT NULL")
+        .bind(id).execute(&mut *tx).await?.rows_affected();
+    if n == 0 { return Err(AppError::conflict("Запроса на отмену этого события нет")); }
+    audit(&mut tx, Some(v), "event.cancel_rejected", "event", Some(id), json!({})).await?;
     let ev = fetch_event(&mut tx, id).await?;
     tx.commit().await?;
-    send_all(st(ctx), to_notify, |r| crate::mail::event_cancelled_mail(&r.email, &r.first_name, &ev.title, reason.as_deref()));
     Ok(ev)
 }
 
@@ -1229,7 +1315,8 @@ pub async fn delete_my_account(ctx: &Context<'_>, password: &str) -> AppResult<b
         sqlx::query("UPDATE volonteers SET email = 'deleted-' || id::text || '@deleted.invalid', phone = '', student_id = NULL, faculty = NULL WHERE id = $1")
             .bind(vol).execute(&mut *tx).await?;
     }
-    sqlx::query("UPDATE persons SET first_name = $2, last_name = $3, middle_name = NULL, birth_date = NULL WHERE id = $1")
+    // телефон освобождается: после удаления человек может зарегистрироваться заново
+    sqlx::query("UPDATE persons SET first_name = $2, last_name = $3, middle_name = NULL, birth_date = NULL, phone = NULL WHERE id = $1")
         .bind(person_id).bind(first).bind(last).execute(&mut *tx).await?;
     sqlx::query("UPDATE map_markers SET contact_phone = NULL, created_by_name = $2 WHERE created_by = $1").bind(v.user_id).bind(&tombstone).execute(&mut *tx).await?;
     sqlx::query("UPDATE marker_closures SET submitted_by_name = $2 WHERE submitted_by = $1").bind(v.user_id).bind(&tombstone).execute(&mut *tx).await?;

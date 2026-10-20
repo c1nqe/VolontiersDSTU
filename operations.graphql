@@ -12,7 +12,7 @@ query Hydrate {
   session { expiresAt }
   privacyPolicyVersion
   events {
-    id title description location startDate endDate requiredVolunteers plannedHours status cancelReason
+    id title description location startDate endDate requiredVolunteers plannedHours status cancelReason cancelRequestedAt
     organizationId organizationName requestsCount approvedVolunteersCount ratingAvg reviewsCount createdAt
   }
   organizations { id name inn contactPerson email phone description createdAt }
@@ -34,8 +34,8 @@ mutation Login($email: String!, $password: String!) {
   login(email: $email, password: $password) { user { id firstName lastName email role } expiresAt }
 }
 # consent — согласие на обработку персональных данных (обязательно); organizationName — для организатора
-mutation Register($firstName: String!, $lastName: String!, $email: String!, $password: String!, $role: UserRole!, $consent: Boolean!, $organizationName: String) {
-  register(firstName: $firstName, lastName: $lastName, email: $email, password: $password, role: $role, consent: $consent, organizationName: $organizationName) {
+mutation Register($firstName: String!, $lastName: String!, $email: String!, $phone: String!, $password: String!, $role: UserRole!, $consent: Boolean!, $organizationName: String) {
+  register(firstName: $firstName, lastName: $lastName, email: $email, phone: $phone, password: $password, role: $role, consent: $consent, organizationName: $organizationName) {
     user { id role } expiresAt
   }
 }
@@ -80,7 +80,10 @@ mutation ConfirmVolunteerWork($requestId: ID!, $confirmedHours: Float!) {
   confirmVolunteerWork(requestId: $requestId, confirmedHours: $confirmedHours) { id status confirmedHours }
 }
 # DRAFT | ACCEPTED → CANCELLED (заявки принятого события отменяются автоматически)
-mutation CancelEvent($eventId: ID!, $reason: String) { cancelEvent(eventId: $eventId, reason: $reason) { id status cancelReason } }
+# администратор — сразу; организатор: черновик сразу, принятое событие — запрос на отмену
+mutation CancelEvent($eventId: ID!, $reason: String) { cancelEvent(eventId: $eventId, reason: $reason) { id status cancelReason cancelRequestedAt } }
+mutation ApproveEventCancellation($eventId: ID!) { approveEventCancellation(eventId: $eventId) { id status } }
+mutation RejectEventCancellation($eventId: ID!) { rejectEventCancellation(eventId: $eventId) { id status } }
 # ACCEPTED → CLOSED
 mutation CloseEvent($eventId: ID!) { closeEvent(eventId: $eventId) { id status } }
 

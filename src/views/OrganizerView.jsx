@@ -86,7 +86,9 @@ export default function OrganizerView() {
               footerInfo={`Заявок: ${evt.requestsCount}`}
               onShowReviews={(e) => openModal('reviews', { eventId: e.id })}
               actions={
-                evt.status === 'ACCEPTED' ? (
+                evt.status === 'ACCEPTED' && evt.cancelRequestedAt ? (
+                  <span className="text-warning" title={evt.cancelReason || ''}>Отмена ждёт решения администратора</span>
+                ) : evt.status === 'ACCEPTED' ? (
                   <>
                     <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => openModal('cancelEvent', { eventId: evt.id })}>Отменить</button>
                     <button type="button" className="btn btn-outline btn-sm" onClick={() => closeEvent(evt)}>Закрыть событие</button>

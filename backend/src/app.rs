@@ -153,6 +153,19 @@ async fn health(State(web): State<Web>) -> Response {
 }
 
 
+/// Кэш собранного фронтенда: файлы из /assets/ содержат хэш в имени и не меняются — кэшируются надолго;
+/// index.html и прочее браузер всегда перепроверяет, иначе после новой сборки страница ссылается
+/// на уже удалённые чанки и окна перестают открываться.
+async fn static_cache(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let hashed = req.uri().path().starts_with("/assets/");
+    let mut res = next.run(req).await;
+    if res.status().is_success() && !res.headers().contains_key(header::CACHE_CONTROL) {
+        let value = if hashed { "public, max-age=31536000, immutable" } else { "no-cache" };
+        res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static(value));
+    }
+    res
+}
+
 pub fn router(state: AppState) -> Router {
     let schema = build_schema(state.clone());
     let web = Web { state: state.clone(), schema };
@@ -166,7 +179,10 @@ pub fn router(state: AppState) -> Router {
 
     if let Some(dir) = &cfg.static_dir {
         let index = format!("{dir}/index.html");
-        app = app.fallback_service(ServeDir::new(dir).not_found_service(ServeFile::new(index)));
+        let files = Router::new()
+            .fallback_service(ServeDir::new(dir).not_found_service(ServeFile::new(index)))
+            .layer(axum::middleware::from_fn(static_cache));
+        app = app.fallback_service(files);
     }
 
     let hdr = |name: &'static str, value: &'static str| SetResponseHeaderLayer::if_not_present(HeaderName::from_static(name), HeaderValue::from_static(value));

@@ -226,6 +226,7 @@ pub struct EventRow {
     pub planned_hours: f64,
     pub status: EventStatus,
     pub cancel_reason: Option<String>,
+    pub cancel_requested_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub requests_count: i64,
     pub approved_count: i64,
@@ -233,7 +234,7 @@ pub struct EventRow {
     pub reviews_count: i64,
 }
 pub const EVENT_SELECT: &str = "SELECT e.id, e.organization_id, o.name AS organization_name, e.title, e.description, e.location,
-        e.start_at, e.end_at, e.required_volunteers, e.planned_hours::float8 AS planned_hours, e.status, e.cancel_reason, e.created_at,
+        e.start_at, e.end_at, e.required_volunteers, e.planned_hours::float8 AS planned_hours, e.status, e.cancel_reason, e.cancel_requested_at, e.created_at,
         (SELECT count(*) FROM volonteer_event_requests r WHERE r.event_id = e.id) AS requests_count,
         (SELECT count(*) FROM volonteer_event_requests r WHERE r.event_id = e.id AND r.status IN ('ACCEPTED','CONFIRMED')) AS approved_count,
         (SELECT round(avg(v.rating)::numeric, 1)::float8 FROM event_reviews v WHERE v.event_id = e.id) AS rating_avg,
@@ -256,8 +257,10 @@ pub struct Event {
     pub required_volunteers: i32,
     pub planned_hours: f64,
     pub status: EventStatus,
-    /// Причина отмены (только у отменённых событий).
+    /// Причина отмены: у отменённого события или у запроса организатора на отмену.
     pub cancel_reason: Option<String>,
+    /// Организатор попросил отменить принятое событие; ждёт решения администратора (RFC 3339) — иначе null.
+    pub cancel_requested_at: Option<String>,
     pub organization_id: ID,
     pub organization_name: String,
     pub requests_count: i64,
@@ -272,7 +275,7 @@ impl From<EventRow> for Event {
             id: gid(r.id), title: r.title, description: r.description, location: r.location,
             start_date: msk_date(r.start_at), end_date: msk_date(r.end_at),
             start_date_time: rfc3339(r.start_at), end_date_time: rfc3339(r.end_at),
-            required_volunteers: r.required_volunteers, planned_hours: r.planned_hours, status: r.status, cancel_reason: r.cancel_reason,
+            required_volunteers: r.required_volunteers, planned_hours: r.planned_hours, status: r.status, cancel_reason: r.cancel_reason, cancel_requested_at: r.cancel_requested_at.map(rfc3339),
             organization_id: gid(r.organization_id), organization_name: r.organization_name,
             requests_count: r.requests_count, approved_volunteers_count: r.approved_count,
             rating_avg: r.rating_avg, reviews_count: r.reviews_count, created_at: rfc3339(r.created_at),

@@ -43,9 +43,13 @@ type Event {
 	plannedHours: Float!
 	status: EventStatus!
 	"""
-	Причина отмены (только у отменённых событий).
+	Причина отмены: у отменённого события или у запроса организатора на отмену.
 	"""
 	cancelReason: String
+	"""
+	Организатор попросил отменить принятое событие; ждёт решения администратора (RFC 3339) — иначе null.
+	"""
+	cancelRequestedAt: String
 	organizationId: ID!
 	organizationName: String!
 	requestsCount: Int!
@@ -135,9 +139,10 @@ enum MapMarkerType {
 type Mutation {
 	"""
 	Регистрация волонтёра или организатора. `consent` — согласие на обработку персональных данных (обязательно).
-	Для организатора можно указать название организации.
+	Для организатора можно указать название организации. Один человек — одна учётная запись:
+	телефон уникален, второй аккаунт (в том числе в другой роли) на тот же номер не создаётся.
 	"""
-	register(firstName: String!, lastName: String!, email: String!, password: String!, role: UserRole!, consent: Boolean!, organizationName: String): AuthPayload!
+	register(firstName: String!, lastName: String!, email: String!, phone: String!, password: String!, role: UserRole!, consent: Boolean!, organizationName: String): AuthPayload!
 	login(email: String!, password: String!): AuthPayload!
 	"""
 	Завершает все сессии пользователя (token_version++), очищает cookie.
@@ -188,9 +193,19 @@ type Mutation {
 	"""
 	confirmVolunteerWork(requestId: ID!, confirmedHours: Float!): VolonteerEventRequest!
 	"""
-	DRAFT | ACCEPTED → CANCELLED. Заявки принятого события отменяются автоматически.
+	Администратор: DRAFT | ACCEPTED → CANCELLED сразу. Организатор (только своей организации): черновик снимается сразу,
+	принятое событие — запрос на отмену (обязательна причина), который согласует администратор.
+	Заявки отменённого события отменяются автоматически.
 	"""
 	cancelEvent(eventId: ID!, reason: String): Event!
+	"""
+	Администратор согласует запрос организатора на отмену: ACCEPTED → CANCELLED.
+	"""
+	approveEventCancellation(eventId: ID!): Event!
+	"""
+	Администратор отклоняет запрос на отмену: событие остаётся в силе.
+	"""
+	rejectEventCancellation(eventId: ID!): Event!
 	"""
 	ACCEPTED → CLOSED
 	"""

@@ -78,7 +78,7 @@ const ROLES = [
 export function RegisterModal({ onClose, onAuthenticated }) {
   const store = useStore();
   const { showToast, openModal } = useUI();
-  const [form, setForm] = useState({ role: 'VOLUNTEER', firstName: '', lastName: '', email: '', password: '', organizationName: '', consent: false });
+  const [form, setForm] = useState({ role: 'VOLUNTEER', firstName: '', lastName: '', email: '', phone: '', password: '', organizationName: '', consent: false });
   const bind = (k) => ({ value: form[k], onChange: (e) => setForm((f) => ({ ...f, [k]: e.target.value })) });
 
   const submit = async () => {
@@ -130,6 +130,9 @@ export function RegisterModal({ onClose, onAuthenticated }) {
       )}
       <Field label="Электронная почта" required>
         <input type="email" className="form-input" required placeholder="ivan.petrov@donstu.ru" autoComplete="email" {...bind('email')} />
+      </Field>
+      <Field label="Телефон" required hint="Один человек — одна учётная запись: на один номер нельзя зарегистрировать второй аккаунт, в том числе в другой роли">
+        <input type="tel" className="form-input" required maxLength={40} placeholder="+7 (900) 123-45-67" autoComplete="tel" {...bind('phone')} />
       </Field>
       <Field label="Пароль" required hint="Не менее 8 символов: буквы и хотя бы одна цифра или спецсимвол">
         <input type="password" className="form-input" minLength={8} maxLength={128} required autoComplete="new-password" {...bind('password')} />

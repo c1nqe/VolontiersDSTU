@@ -64,8 +64,10 @@ pub async fn run(pool: &PgPool, reset: bool) -> Result<()> {
         let middle = it.collect::<Vec<_>>().join(" ");
         let pid = Uuid::new_v5(&NS, format!("person:{}", v.key).as_bytes());
         let birth = v.birth.as_deref().map(|b| NaiveDate::parse_from_str(b, "%Y-%m-%d")).transpose()?;
-        sqlx::query("INSERT INTO persons (id, first_name, last_name, middle_name, birth_date) VALUES ($1,$2,$3,$4,$5)")
-            .bind(pid).bind(first).bind(last).bind(if middle.is_empty() { None } else { Some(middle) }).bind(birth).execute(&mut *tx).await?;
+        // нормализованный телефон — ключ правила «один человек — одна учётная запись»
+        let phone = crate::svc::normalize_phone(&v.phone).ok();
+        sqlx::query("INSERT INTO persons (id, first_name, last_name, middle_name, birth_date, phone) VALUES ($1,$2,$3,$4,$5,$6)")
+            .bind(pid).bind(first).bind(last).bind(if middle.is_empty() { None } else { Some(middle) }).bind(birth).bind(phone).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO volonteers (id, person_id, email, phone, student_id, faculty) VALUES ($1,$2,$3,$4,$5,$6)")
             .bind(id(&v.key)).bind(pid).bind(&v.email).bind(&v.phone).bind(&v.student_id).bind(&v.faculty).execute(&mut *tx).await?;
         person_of_vol.insert(v.key.clone(), pid);

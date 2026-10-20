@@ -252,12 +252,31 @@ describe('ApiStore: отмена, регистрация и персональн
     const client = fakeClient({ register: () => ({ register: { user: SNAPSHOT.me, expiresAt: 'x' } }) });
     const store = new ApiStore({ client, storage: memoryStorage() });
     await store.init();
-    const base = { firstName: 'А', lastName: 'Б', email: 'a@b.ru', password: 'Str0ng-pass', consent: true, organizationName: ' Клуб ' };
+    const base = { firstName: 'А', lastName: 'Б', email: 'a@b.ru', phone: ' +7 900 123-45-67 ', password: 'Str0ng-pass', consent: true, organizationName: ' Клуб ' };
     await store.register({ ...base, role: 'ORGANIZER' });
     await store.register({ ...base, role: 'VOLUNTEER' });
     const sent = client.calls.filter((c) => c.query.includes('register(')).map((c) => c.variables);
-    expect(sent[0]).toMatchObject({ role: 'ORGANIZER', consent: true, organizationName: 'Клуб' });
-    expect(sent[1]).toMatchObject({ role: 'VOLUNTEER', consent: true, organizationName: null });
+    expect(sent[0]).toMatchObject({ role: 'ORGANIZER', consent: true, organizationName: 'Клуб', phone: '+7 900 123-45-67' });
+    expect(sent[1]).toMatchObject({ role: 'VOLUNTEER', consent: true, organizationName: null, phone: '+7 900 123-45-67' });
+  });
+
+  it('запросы на отмену событий видны администратору, решения уходят на сервер', async () => {
+    const client = fakeClient({
+      approveEventCancellation: () => ({ approveEventCancellation: { id: 'e1', status: 'CANCELLED' } }),
+      rejectEventCancellation: () => ({ rejectEventCancellation: { id: 'e1', status: 'ACCEPTED' } }),
+    });
+    const store = new ApiStore({ client, storage: memoryStorage() });
+    await store.init();
+    store.state.events = [
+      { id: 'e1', status: 'ACCEPTED', cancelRequestedAt: '2026-10-20T10:00:00Z' },
+      { id: 'e2', status: 'ACCEPTED', cancelRequestedAt: null },
+      { id: 'e3', status: 'CANCELLED', cancelRequestedAt: null },
+    ];
+    expect(store.getCancellationRequests().map((e) => e.id)).toEqual(['e1']);
+    expect((await store.approveEventCancellation('e1')).success).toBe(true);
+    expect((await store.rejectEventCancellation('e1')).success).toBe(true);
+    expect(client.calls.find((c) => c.query.includes('approveEventCancellation(')).variables).toEqual({ eventId: 'e1' });
+    expect(client.calls.find((c) => c.query.includes('rejectEventCancellation(')).variables).toEqual({ eventId: 'e1' });
   });
 
   it('выгрузка данных возвращает JSON-текст и имя файла', async () => {
