@@ -18,16 +18,22 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     let cfg = Config::from_env()?;
+    volontiers_server::crypto::init(&cfg.data_key);
     let pool = PgPoolOptions::new().max_connections(10).acquire_timeout(std::time::Duration::from_secs(5))
         .connect(&cfg.database_url).await.context("не удалось подключиться к PostgreSQL")?;
 
     match cmd.as_str() {
-        "migrate" => { MIGRATOR.run(&pool).await?; tracing::info!("миграции применены"); }
+        "migrate" => {
+            MIGRATOR.run(&pool).await?;
+            volontiers_server::pii::encrypt_existing(&pool).await?;
+            tracing::info!("миграции применены");
+        }
         "seed" => {
             if cfg.production {
                 anyhow::bail!("seed загружает демо-учётки с простыми паролями и запрещён при APP_ENV=production. Создайте администратора командой create-admin");
             }
             MIGRATOR.run(&pool).await?;
+            volontiers_server::pii::encrypt_existing(&pool).await?;
             let reset = std::env::args().any(|a| a == "--reset");
             seed::run(&pool, reset).await?;
         }
@@ -53,6 +59,8 @@ async fn main() -> anyhow::Result<()> {
         }
         "serve" => {
             if cfg.run_migrations { MIGRATOR.run(&pool).await?; }
+            // данные, записанные до шифрования, шифруются сразу при старте
+            volontiers_server::pii::encrypt_existing(&pool).await?;
             let bind = cfg.bind.clone();
             let mailer = Arc::new(volontiers_server::mail::Mailer::from_config(&cfg)?);
             if !mailer.enabled() { tracing::warn!("SMTP не настроен: восстановление пароля и подтверждение почты недоступны"); }

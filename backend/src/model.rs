@@ -86,7 +86,7 @@ pub struct UserRow {
 impl From<UserRow> for User {
     fn from(r: UserRow) -> Self {
         User {
-            id: gid(r.id), first_name: r.first_name, last_name: r.last_name, email: r.email, role: r.role,
+            id: gid(r.id), first_name: r.first_name, last_name: r.last_name, email: crate::crypto::open(&r.email), role: r.role,
             created_at: rfc3339(r.created_at), organization_id: r.organization_id.map(gid), volonteer_id: r.volonteer_id.map(gid),
             consent_accepted_at: r.consent_at.map(rfc3339), consent_version: r.consent_version, email_verified: r.email_verified_at.is_some(),
         }
@@ -137,8 +137,8 @@ impl Organization {
             id: gid(r.id), name: r.name, description: r.description, created_at: rfc3339(r.created_at),
             inn: reveal.then_some(r.inn).flatten(),
             contact_person: reveal.then_some(r.contact_person),
-            email: reveal.then_some(r.email),
-            phone: reveal.then_some(r.phone),
+            email: reveal.then(|| crate::crypto::open(&r.email)),
+            phone: reveal.then(|| crate::crypto::open(&r.phone)),
         }
     }
 }
@@ -156,7 +156,8 @@ pub struct VolonteerRow {
     pub first_name: String,
     pub last_name: String,
     pub full_name: String,
-    pub birth_date: Option<NaiveDate>,
+    /// Зашифрованная дата рождения (ГГГГ-ММ-ДД), см. crypto.rs.
+    pub birth_date: Option<String>,
     pub email: String,
     pub phone: String,
     pub student_id: Option<String>,
@@ -197,9 +198,9 @@ impl Volonteer {
         let full = access == VolAccess::Full;
         Volonteer {
             id: gid(r.id), full_name: r.full_name, first_name: r.first_name, last_name: r.last_name,
-            email: contacts.then_some(r.email), phone: contacts.then_some(r.phone),
-            birth_date: if full { opt_date(r.birth_date) } else { None },
-            student_id: contacts.then_some(r.student_id).flatten(), faculty: r.faculty,
+            email: contacts.then(|| crate::crypto::open(&r.email)), phone: contacts.then(|| crate::crypto::open(&r.phone)),
+            birth_date: if full { crate::crypto::open_opt(r.birth_date) } else { None },
+            student_id: if contacts { crate::crypto::open_opt(r.student_id) } else { None }, faculty: r.faculty,
             total_confirmed_hours: r.total_hours, created_at: rfc3339(r.created_at),
         }
     }
@@ -352,7 +353,7 @@ impl From<RequestRow> for VolonteerEventRequest {
     fn from(r: RequestRow) -> Self {
         VolonteerEventRequest {
             id: gid(r.id), volonteer_id: gid(r.volonteer_id), volonteer_name: r.volonteer_name,
-            volonteer_faculty: r.volonteer_faculty, volonteer_student_id: r.volonteer_student_id,
+            volonteer_faculty: r.volonteer_faculty, volonteer_student_id: crate::crypto::open_opt(r.volonteer_student_id),
             event_id: gid(r.event_id), event_title: r.event_title, event_date: msk_date(r.event_start),
             event_status: r.event_status, organization_name: r.organization_name, description: r.description,
             status: r.status, requested_hours: r.requested_hours, confirmed_hours: r.confirmed_hours,

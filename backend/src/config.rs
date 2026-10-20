@@ -28,6 +28,8 @@ pub struct Config {
     pub bind: String,
     pub production: bool,
     pub jwt_secret: Vec<u8>,
+    /// Мастер-ключ шифрования персональных данных (DATA_ENCRYPTION_KEY, 32 байта в hex).
+    pub data_key: [u8; 32],
     pub session_hours: i64,
     pub cookie_secure: bool,
     pub allowed_origins: Vec<String>,
@@ -65,6 +67,10 @@ pub fn valid_tile_host(h: &str) -> bool {
         && host.split('.').all(|l| !l.is_empty() && l.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'))
 }
 
+/// Ключ разработки и тестов. Нигде, кроме локальной машины, не используется: в production сервер без
+/// DATA_ENCRYPTION_KEY не запустится.
+const DEV_DATA_KEY: [u8; 32] = *b"volontiers-dev-only-data-key-32b";
+
 fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
@@ -77,6 +83,21 @@ impl Config {
         let production = env("APP_ENV").map(|v| v == "production").unwrap_or(false);
         let database_url = env("DATABASE_URL").context("не задана переменная DATABASE_URL")?;
 
+        let data_key = match env("DATA_ENCRYPTION_KEY") {
+            Some(k) => {
+                let raw = hex::decode(&k).ok().filter(|b| b.len() == 32)
+                    .context("DATA_ENCRYPTION_KEY: ожидается 64 hex-символа (32 байта), сгенерировать: openssl rand -hex 32")?;
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&raw);
+                key
+            }
+            None if production => bail!("В production обязательно задайте DATA_ENCRYPTION_KEY (openssl rand -hex 32) — им шифруются персональные данные"),
+            None => {
+                // постоянный ключ только для локальной разработки: данные остаются читаемыми между перезапусками
+                tracing::warn!("DATA_ENCRYPTION_KEY не задан: используется общий ключ разработки, для реальных данных он не годится");
+                DEV_DATA_KEY
+            }
+        };
         let jwt_secret = match env("JWT_SECRET") {
             Some(s) => {
                 if s.len() < 32 {
@@ -141,6 +162,7 @@ impl Config {
             bind: env("BIND").unwrap_or_else(|| "127.0.0.1:8080".into()),
             production,
             jwt_secret,
+            data_key,
             session_hours: env("SESSION_HOURS").and_then(|v| v.parse().ok()).unwrap_or(24),
             cookie_secure: flag("COOKIE_SECURE", production),
             allowed_origins,
@@ -168,6 +190,7 @@ impl Config {
             bind: "127.0.0.1:0".into(),
             production: false,
             jwt_secret: b"test-secret-test-secret-test-secret-1234".to_vec(),
+            data_key: DEV_DATA_KEY,
             session_hours: 24,
             cookie_secure: false,
             allowed_origins: vec!["http://localhost:5173".into()],

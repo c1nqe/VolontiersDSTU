@@ -7,7 +7,7 @@ use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::{auth, media, model::parse_when};
+use crate::{auth, crypto, media, model::parse_when};
 
 const DEMO: &str = include_str!("../seed/demo.json");
 const NS: Uuid = Uuid::from_u128(0x7a0c_e5d1_9b34_4f6a_8c21_0d5e_aa10_5eed);
@@ -53,7 +53,7 @@ pub async fn run(pool: &PgPool, reset: bool) -> Result<()> {
     // организации
     for (i, o) in demo.organizations.iter().enumerate() {
         sqlx::query("INSERT INTO organizations (id, name, inn, contact_person, email, phone, description, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
-            .bind(id(&o.key)).bind(&o.name).bind(&o.inn).bind(&o.contact).bind(&o.email).bind(&o.phone).bind(&o.description)
+            .bind(id(&o.key)).bind(&o.name).bind(&o.inn).bind(&o.contact).bind(crypto::seal(&o.email)).bind(crypto::seal(&o.phone)).bind(&o.description)
             .bind(Utc::now() - Duration::days(60 - i as i64)).execute(&mut *tx).await?;
     }
     // волонтёры (+ персоны)
@@ -65,11 +65,13 @@ pub async fn run(pool: &PgPool, reset: bool) -> Result<()> {
         let pid = Uuid::new_v5(&NS, format!("person:{}", v.key).as_bytes());
         let birth = v.birth.as_deref().map(|b| NaiveDate::parse_from_str(b, "%Y-%m-%d")).transpose()?;
         // нормализованный телефон — ключ правила «один человек — одна учётная запись»
-        let phone = crate::svc::normalize_phone(&v.phone).ok();
-        sqlx::query("INSERT INTO persons (id, first_name, last_name, middle_name, birth_date, phone) VALUES ($1,$2,$3,$4,$5,$6)")
-            .bind(pid).bind(first).bind(last).bind(if middle.is_empty() { None } else { Some(middle) }).bind(birth).bind(phone).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO volonteers (id, person_id, email, phone, student_id, faculty) VALUES ($1,$2,$3,$4,$5,$6)")
-            .bind(id(&v.key)).bind(pid).bind(&v.email).bind(&v.phone).bind(&v.student_id).bind(&v.faculty).execute(&mut *tx).await?;
+        let phone_hash = crate::svc::normalize_phone(&v.phone).ok().map(|p| crypto::blind_index(&p));
+        let birth = birth.map(|d| crypto::seal(&d.format("%Y-%m-%d").to_string()));
+        sqlx::query("INSERT INTO persons (id, first_name, last_name, middle_name, birth_date, phone_hash) VALUES ($1,$2,$3,$4,$5,$6)")
+            .bind(pid).bind(first).bind(last).bind(if middle.is_empty() { None } else { Some(middle) }).bind(birth).bind(phone_hash).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO volonteers (id, person_id, email, email_hash, phone, student_id, faculty) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+            .bind(id(&v.key)).bind(pid).bind(crypto::seal(&v.email)).bind(crypto::email_index(&v.email)).bind(crypto::seal(&v.phone))
+            .bind(crypto::seal_opt(v.student_id.as_deref())).bind(&v.faculty).execute(&mut *tx).await?;
         person_of_vol.insert(v.key.clone(), pid);
     }
     // учётные записи
@@ -86,9 +88,9 @@ pub async fn run(pool: &PgPool, reset: bool) -> Result<()> {
         let pw = u.password.clone();
         let hash = tokio::task::spawn_blocking(move || auth::hash_password(&pw)).await??;
         let role: &str = &u.role;
-        sqlx::query("INSERT INTO users (id, person_id, email, password_hash, role, organization_id, volonteer_id, created_at, consent_version, consent_at, email_verified_at) VALUES ($1,$2,$3,$4,$5::user_role,$6,$7,$8,$9,now(),now())")
-            .bind(id(&u.key)).bind(pid).bind(&u.email).bind(hash).bind(role)
-            .bind(u.org.as_deref().map(id)).bind(u.vol.as_deref().map(id)).bind(ts(&u.created_at)?).bind(crate::svc::PRIVACY_POLICY_VERSION).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO users (id, person_id, email, email_hash, password_hash, role, organization_id, volonteer_id, created_at, consent_version, consent_at, email_verified_at) VALUES ($1,$2,$3,$10,$4,$5::user_role,$6,$7,$8,$9,now(),now())")
+            .bind(id(&u.key)).bind(pid).bind(crypto::seal(&u.email)).bind(hash).bind(role)
+            .bind(u.org.as_deref().map(id)).bind(u.vol.as_deref().map(id)).bind(ts(&u.created_at)?).bind(crate::svc::PRIVACY_POLICY_VERSION).bind(crypto::email_index(&u.email)).execute(&mut *tx).await?;
     }
     // события: создаём DRAFT, затем доводим до нужного статуса по правилам автомата
     for e in &demo.events {
@@ -136,7 +138,7 @@ pub async fn run(pool: &PgPool, reset: bool) -> Result<()> {
         sqlx::query("INSERT INTO map_markers (id, type, title, description, lat, lng, urgency, contact_phone, last_seen_date, last_seen_location, created_by, created_by_name, created_at)
                      VALUES ($1,$2::marker_type,$3,$4,$5,$6,$7::urgency,$8,$9,$10,$11,$12,$13)")
             .bind(id(&m.key)).bind(&m.kind).bind(&m.title).bind(&m.description).bind(m.lat).bind(m.lng).bind(&m.urgency)
-            .bind(&m.phone).bind(seen).bind(&m.seen_loc).bind(creator).bind(&m.by_name).bind(ts(&m.created_at)?).execute(&mut *tx).await?;
+            .bind(crypto::seal_opt(m.phone.as_deref())).bind(seen).bind(&m.seen_loc).bind(creator).bind(&m.by_name).bind(ts(&m.created_at)?).execute(&mut *tx).await?;
         for p in 0..m.demo_photos {
             let bytes = media::placeholder(p + n as u8 * 3);
             let sha = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&bytes));
@@ -177,8 +179,8 @@ pub async fn create_admin(pool: &PgPool, email: &str, last: &str, first: &str, p
     let hash = tokio::task::spawn_blocking(move || auth::hash_password(&pw)).await??;
     let mut tx = pool.begin().await?;
     let pid: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name) VALUES ($1,$2) RETURNING id").bind(first).bind(last).fetch_one(&mut *tx).await?;
-    let uid: Uuid = sqlx::query_scalar("INSERT INTO users (person_id, email, password_hash, role, consent_version, consent_at, email_verified_at) VALUES ($1,$2,$3,'ADMIN',$4,now(),now()) RETURNING id")
-        .bind(pid).bind(&email).bind(hash).bind(crate::svc::PRIVACY_POLICY_VERSION).fetch_one(&mut *tx).await.context("не удалось создать администратора (email занят?)")?;
+    let uid: Uuid = sqlx::query_scalar("INSERT INTO users (person_id, email, email_hash, password_hash, role, consent_version, consent_at, email_verified_at) VALUES ($1,$2,$5,$3,'ADMIN',$4,now(),now()) RETURNING id")
+        .bind(pid).bind(crypto::seal(&email)).bind(hash).bind(crate::svc::PRIVACY_POLICY_VERSION).bind(crypto::email_index(&email)).fetch_one(&mut *tx).await.context("не удалось создать администратора (email занят?)")?;
     sqlx::query("INSERT INTO audit_log (actor_role, action, entity, entity_id) VALUES ('ADMIN', 'admin.created_via_cli', 'user', $1)").bind(uid).execute(&mut *tx).await?;
     tx.commit().await?;
     tracing::info!("администратор {email} создан");

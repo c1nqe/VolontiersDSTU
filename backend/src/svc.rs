@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::{
     app::AppState,
     auth::{self, Viewer},
+    crypto,
     error::{AppError, AppResult},
     media,
     model::*,
@@ -89,14 +90,15 @@ pub fn normalize_phone(p: &str) -> AppResult<String> {
 }
 const PHONE_TAKEN: &str = "Этот номер телефона уже привязан к другой учётной записи. Один человек может иметь только одну учётную запись — войдите в неё или восстановите пароль.";
 
+/// phone — нормализованный номер; в БД сравнивается только его слепой индекс.
 async fn ensure_phone_free(conn: &mut PgConnection, phone: &str, except_person: Option<Uuid>) -> AppResult<()> {
-    let taken: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM persons WHERE phone = $1 AND ($2::uuid IS NULL OR id <> $2))")
-        .bind(phone).bind(except_person).fetch_one(conn).await?;
+    let taken: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM persons WHERE phone_hash = $1 AND ($2::uuid IS NULL OR id <> $2))")
+        .bind(crypto::blind_index(phone)).bind(except_person).fetch_one(conn).await?;
     if taken { Err(AppError::conflict(PHONE_TAKEN)) } else { Ok(()) }
 }
 /// Уникальный индекс persons_phone_uq ловит гонку двух одновременных регистраций.
 fn phone_conflict(e: sqlx::Error) -> AppError {
-    let unique_phone = matches!(&e, sqlx::Error::Database(d) if d.constraint() == Some("persons_phone_uq"));
+    let unique_phone = matches!(&e, sqlx::Error::Database(d) if d.constraint() == Some("persons_phone_hash_uq"));
     if unique_phone { AppError::conflict(PHONE_TAKEN) } else { AppError::from(e) }
 }
 fn finite(x: f64, field: &str) -> AppResult<f64> {
@@ -166,7 +168,7 @@ async fn issue_email_token(conn: &mut PgConnection, user_id: Uuid, purpose: &str
     rand::thread_rng().fill_bytes(&mut raw);
     let token = URL_SAFE_NO_PAD.encode(raw);
     sqlx::query("INSERT INTO email_tokens (user_id, purpose, token_hash, sent_to, expires_at) VALUES ($1, $2::email_token_purpose, $3, $4, now() + make_interval(mins => $5))")
-        .bind(user_id).bind(purpose).bind(hash_token(&token)).bind(email).bind(ttl_minutes).execute(&mut *conn).await?;
+        .bind(user_id).bind(purpose).bind(hash_token(&token)).bind(crypto::email_index(email)).bind(ttl_minutes).execute(&mut *conn).await?;
     Ok(Some(token))
 }
 
@@ -178,6 +180,7 @@ async fn send_verification(ctx: &Context<'_>, user_id: Uuid) {
         let (email, name): (String, String) = sqlx::query_as("SELECT u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1 AND u.deleted_at IS NULL AND u.email_verified_at IS NULL")
             .bind(user_id).fetch_one(&s.pool).await?;
         let mut conn = s.pool.acquire().await?;
+        let email = crypto::open(&email);
         if let Some(token) = issue_email_token(&mut conn, user_id, "VERIFY_EMAIL", &email, VERIFY_TTL_HOURS * 60).await? {
             let link = format!("{}/?verify={token}", s.cfg.public_url);
             s.mailer.send(crate::mail::verification_mail(&email, &name, &link));
@@ -192,26 +195,31 @@ async fn send_verification(ctx: &Context<'_>, user_id: Uuid) {
 #[derive(sqlx::FromRow)]
 struct Recipient { email: String, first_name: String }
 
+/// Адреса в БД зашифрованы — расшифровываем перед отправкой.
+fn opened(list: Vec<Recipient>) -> Vec<Recipient> {
+    list.into_iter().map(|r| Recipient { email: crypto::open(&r.email), first_name: r.first_name }).filter(|r| !r.email.is_empty()).collect()
+}
+
 async fn recipients_by_user(s: &AppState, user_id: Uuid) -> Vec<Recipient> {
     sqlx::query_as("SELECT u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1 AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
-        .bind(user_id).fetch_all(&s.pool).await.unwrap_or_default()
+        .bind(user_id).fetch_all(&s.pool).await.map(opened).unwrap_or_default()
 }
 
 async fn recipients_admins(s: &AppState) -> Vec<Recipient> {
     sqlx::query_as("SELECT u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.role = 'ADMIN' AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
-        .fetch_all(&s.pool).await.unwrap_or_default()
+        .fetch_all(&s.pool).await.map(opened).unwrap_or_default()
 }
 
 async fn recipients_by_volonteer(conn: &mut PgConnection, vol: Uuid) -> Vec<Recipient> {
     sqlx::query_as("SELECT u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.volonteer_id = $1 AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
-        .bind(vol).fetch_all(conn).await.unwrap_or_default()
+        .bind(vol).fetch_all(conn).await.map(opened).unwrap_or_default()
 }
 
 /// Волонтёры (с подтверждённой почтой), у которых заявки на событие ещё не закрыты.
 async fn recipients_open_requests(conn: &mut PgConnection, event_id: Uuid) -> Vec<Recipient> {
     sqlx::query_as("SELECT DISTINCT u.email, p.first_name FROM volonteer_event_requests r JOIN users u ON u.volonteer_id = r.volonteer_id JOIN persons p ON p.id = u.person_id
                      WHERE r.event_id = $1 AND r.status IN ('OPEN','ACCEPTED') AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
-        .bind(event_id).fetch_all(conn).await.unwrap_or_default()
+        .bind(event_id).fetch_all(conn).await.map(opened).unwrap_or_default()
 }
 
 fn send_all(s: &AppState, to: Vec<Recipient>, build: impl Fn(&Recipient) -> crate::mail::Mail) {
@@ -236,9 +244,10 @@ pub async fn request_password_reset(ctx: &Context<'_>, email: &str) -> AppResult
     let email = email.trim().to_lowercase();
     // Ответ одинаков для существующих и несуществующих адресов — перебором узнать, кто зарегистрирован, нельзя.
     let row: Option<(Uuid, String, String)> = sqlx::query_as(
-        "SELECT u.id, u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE lower(u.email) = $1 AND u.deleted_at IS NULL",
-    ).bind(&email).fetch_optional(&s.pool).await?;
+        "SELECT u.id, u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.email_hash = $1 AND u.deleted_at IS NULL",
+    ).bind(crypto::email_index(&email)).fetch_optional(&s.pool).await?;
     if let Some((id, addr, name)) = row {
+        let addr = crypto::open(&addr);
         let mut tx = s.pool.begin().await?;
         if let Some(token) = issue_email_token(&mut tx, id, "RESET_PASSWORD", &addr, RESET_TTL_MINUTES).await? {
             audit(&mut tx, None, "auth.reset_requested", "user", Some(id), json!({})).await?;
@@ -259,10 +268,11 @@ pub async fn reset_password(ctx: &Context<'_>, token: &str, new_password: &str) 
     let row: Option<(Uuid, Uuid, String)> = sqlx::query_as(
         "SELECT t.id, u.id, u.email FROM email_tokens t JOIN users u ON u.id = t.user_id
           WHERE t.token_hash = $1 AND t.purpose = 'RESET_PASSWORD' AND t.used_at IS NULL AND t.expires_at > now()
-            AND u.deleted_at IS NULL AND lower(u.email) = lower(t.sent_to)
+            AND u.deleted_at IS NULL AND u.email_hash = t.sent_to
           FOR UPDATE OF t",
     ).bind(hash_token(token.trim())).fetch_optional(&mut *tx).await?;
     let (token_id, user_id, email) = row.ok_or_else(|| AppError::validation(BAD_LINK))?;
+    let email = crypto::open(&email);
     // пароль проверяется до погашения токена: слабый пароль не «сжигает» ссылку
     auth::validate_password(new_password, &email)?;
     let n = new_password.to_string();
@@ -283,7 +293,7 @@ pub async fn verify_email(ctx: &Context<'_>, token: &str) -> AppResult<bool> {
     let row: Option<(Uuid, Uuid)> = sqlx::query_as(
         "SELECT t.id, u.id FROM email_tokens t JOIN users u ON u.id = t.user_id
           WHERE t.token_hash = $1 AND t.purpose = 'VERIFY_EMAIL' AND t.used_at IS NULL AND t.expires_at > now()
-            AND u.deleted_at IS NULL AND lower(u.email) = lower(t.sent_to)
+            AND u.deleted_at IS NULL AND u.email_hash = t.sent_to
           FOR UPDATE OF t",
     ).bind(hash_token(token.trim())).fetch_optional(&mut *tx).await?;
     let (token_id, user_id) = row.ok_or_else(|| AppError::validation(BAD_LINK))?;
@@ -316,8 +326,8 @@ pub async fn login(ctx: &Context<'_>, email: &str, password: &str) -> AppResult<
     if password.len() > 1024 { return Err(AppError::validation(BAD_CREDENTIALS)); }
 
     let row: Option<(Uuid, String, i32, i16, Option<chrono::DateTime<Utc>>)> = sqlx::query_as(
-        "SELECT id, password_hash, token_version, failed_logins, locked_until FROM users WHERE lower(email) = $1 AND deleted_at IS NULL",
-    ).bind(&email).fetch_optional(pool).await?;
+        "SELECT id, password_hash, token_version, failed_logins, locked_until FROM users WHERE email_hash = $1 AND deleted_at IS NULL",
+    ).bind(crypto::email_index(&email)).fetch_optional(pool).await?;
 
     let Some((id, hash, tv, failed, locked_until)) = row else {
         let p = password.to_string();
@@ -370,7 +380,8 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
     let phone = normalize_phone(&phone_display)?;
     auth::validate_password(password, &email)?;
     let pool = &st(ctx).pool;
-    let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM users WHERE lower(email) = $1").bind(&email).fetch_optional(pool).await?;
+    let email_hash = crypto::email_index(&email);
+    let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM users WHERE email_hash = $1").bind(&email_hash).fetch_optional(pool).await?;
     if exists.is_some() {
         return Err(AppError::conflict("Пользователь с таким адресом электронной почты уже зарегистрирован!"));
     }
@@ -380,13 +391,13 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
     let hash = tokio::task::spawn_blocking(move || auth::hash_password(&pw)).await.map_err(|e| anyhow::anyhow!("join: {e}"))??;
 
     let mut tx = pool.begin().await?;
-    let person_id: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, phone) VALUES ($1,$2,$3) RETURNING id")
-        .bind(&first).bind(&last).bind(&phone).fetch_one(&mut *tx).await.map_err(phone_conflict)?;
+    let person_id: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, phone_hash) VALUES ($1,$2,$3) RETURNING id")
+        .bind(&first).bind(&last).bind(crypto::blind_index(&phone)).fetch_one(&mut *tx).await.map_err(phone_conflict)?;
     let (mut org, mut vol): (Option<Uuid>, Option<Uuid>) = (None, None);
     match role {
         UserRole::Volunteer => {
-            vol = Some(sqlx::query_scalar("INSERT INTO volonteers (person_id, email, phone) VALUES ($1,$2,$3) RETURNING id")
-                .bind(person_id).bind(&email).bind(&phone_display).fetch_one(&mut *tx).await.map_err(|e| match AppError::from(e) {
+            vol = Some(sqlx::query_scalar("INSERT INTO volonteers (person_id, email, email_hash, phone) VALUES ($1,$2,$3,$4) RETURNING id")
+                .bind(person_id).bind(crypto::seal(&email)).bind(&email_hash).bind(crypto::seal(&phone_display)).fetch_one(&mut *tx).await.map_err(|e| match AppError::from(e) {
                     AppError::Conflict(_) => AppError::conflict("Волонтёр с таким адресом электронной почты уже существует"),
                     other => other,
                 })?);
@@ -400,17 +411,17 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
             let taken: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM organizations WHERE lower(name) = lower($1)").bind(&name).fetch_optional(&mut *tx).await?;
             if taken.is_some() {
                 if explicit.is_some() { return Err(AppError::conflict("Организация с таким названием уже зарегистрирована")); }
-                name = format!("{name} ({email})");
+                name = format!("{name} №{}", &Uuid::new_v4().simple().to_string()[..6]);
             }
             org = Some(sqlx::query_scalar(
                 "INSERT INTO organizations (name, contact_person, email, phone, description) VALUES ($1,$2,$3,$4,'Новый организатор социально-волонтёрских инициатив') RETURNING id",
-            ).bind(&name).bind(format!("{last} {first}")).bind(&email).bind(&phone_display).fetch_one(&mut *tx).await?);
+            ).bind(&name).bind(format!("{last} {first}")).bind(crypto::seal(&email)).bind(crypto::seal(&phone_display)).fetch_one(&mut *tx).await?);
         }
         UserRole::Admin => unreachable!(),
     }
     let user_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO users (person_id, email, password_hash, role, organization_id, volonteer_id, consent_version, consent_at) VALUES ($1,$2,$3,$4,$5,$6,$7,now()) RETURNING id",
-    ).bind(person_id).bind(&email).bind(&hash).bind(role).bind(org).bind(vol).bind(PRIVACY_POLICY_VERSION).fetch_one(&mut *tx).await
+        "INSERT INTO users (person_id, email, email_hash, password_hash, role, organization_id, volonteer_id, consent_version, consent_at) VALUES ($1,$2,$8,$3,$4,$5,$6,$7,now()) RETURNING id",
+    ).bind(person_id).bind(crypto::seal(&email)).bind(&hash).bind(role).bind(org).bind(vol).bind(PRIVACY_POLICY_VERSION).bind(&email_hash).fetch_one(&mut *tx).await
         .map_err(|e| match AppError::from(e) {
             AppError::Conflict(_) => AppError::conflict("Пользователь с таким адресом электронной почты уже зарегистрирован!"),
             other => other,
@@ -440,6 +451,7 @@ pub async fn change_password(ctx: &Context<'_>, old: &str, new: &str) -> AppResu
     let v = need(ctx)?;
     let pool = &st(ctx).pool;
     let (hash, email): (String, String) = sqlx::query_as("SELECT password_hash, email FROM users WHERE id = $1").bind(v.user_id).fetch_one(pool).await?;
+    let email = crypto::open(&email);
     let o = old.to_string();
     let ok = tokio::task::spawn_blocking(move || auth::verify_password(&o, &hash)).await.map_err(|e| anyhow::anyhow!("join: {e}"))?;
     if !ok { return Err(AppError::validation("Текущий пароль указан неверно")); }
@@ -496,7 +508,7 @@ pub async fn register_organization(ctx: &Context<'_>, name: &str, contact: &str,
     let row = sqlx::query_as::<_, OrganizationRow>(
         "INSERT INTO organizations (name, inn, contact_person, email, phone, description) VALUES ($1,$2,$3,$4,$5,$6)
          RETURNING id, name, inn, contact_person, email, phone, description, created_at",
-    ).bind(&name).bind(&inn).bind(&contact).bind(&email).bind(&phone).bind(&description).fetch_one(&mut *tx).await
+    ).bind(&name).bind(&inn).bind(&contact).bind(crypto::seal(&email)).bind(crypto::seal(&phone)).bind(&description).fetch_one(&mut *tx).await
         .map_err(|e| match AppError::from(e) { AppError::Conflict(_) => AppError::conflict("Организация с таким названием уже существует"), o => o })?;
     audit(&mut tx, Some(v), "organization.register", "organization", Some(row.id), json!({"name": name})).await?;
     tx.commit().await?;
@@ -562,10 +574,11 @@ pub async fn register_volonteer(ctx: &Context<'_>, full_name: &str, email: &str,
     };
     let mut tx = st(ctx).pool.begin().await?;
     ensure_phone_free(&mut tx, &phone_norm, None).await?;
-    let person_id: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, middle_name, birth_date, phone) VALUES ($1,$2,$3,$4,$5) RETURNING id")
-        .bind(&first).bind(&last).bind(&middle).bind(birth).bind(&phone_norm).fetch_one(&mut *tx).await.map_err(phone_conflict)?;
-    let id: Uuid = sqlx::query_scalar("INSERT INTO volonteers (person_id, email, phone, student_id, faculty) VALUES ($1,$2,$3,$4,$5) RETURNING id")
-        .bind(person_id).bind(&email).bind(&phone).bind(&student_id).bind(&faculty).fetch_one(&mut *tx).await
+    let birth = birth.map(|d| crypto::seal(&d.format("%Y-%m-%d").to_string()));
+    let person_id: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, middle_name, birth_date, phone_hash) VALUES ($1,$2,$3,$4,$5) RETURNING id")
+        .bind(&first).bind(&last).bind(&middle).bind(birth).bind(crypto::blind_index(&phone_norm)).fetch_one(&mut *tx).await.map_err(phone_conflict)?;
+    let id: Uuid = sqlx::query_scalar("INSERT INTO volonteers (person_id, email, email_hash, phone, student_id, faculty) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
+        .bind(person_id).bind(crypto::seal(&email)).bind(crypto::email_index(&email)).bind(crypto::seal(&phone)).bind(crypto::seal_opt(student_id.as_deref())).bind(&faculty).fetch_one(&mut *tx).await
         .map_err(|e| match AppError::from(e) { AppError::Conflict(_) => AppError::conflict("Волонтёр с таким адресом электронной почты уже существует"), o => o })?;
     audit(&mut tx, Some(v), "volonteer.register", "volonteer", Some(id), json!({})).await?;
     let row = sqlx::query_as::<_, VolonteerRow>(&format!("{VOL_SELECT} WHERE v.id = $1")).bind(id).fetch_one(&mut *tx).await?;
@@ -590,11 +603,11 @@ pub async fn update_my_profile(ctx: &Context<'_>, first_name: Option<String>, la
         let norm = if p.is_empty() { None } else { Some(normalize_phone(p)?) };
         let person: Uuid = sqlx::query_scalar("SELECT person_id FROM volonteers WHERE id = $1").bind(vol_id).fetch_one(&mut *tx).await?;
         if let Some(n) = &norm { ensure_phone_free(&mut tx, n, Some(person)).await?; }
-        sqlx::query("UPDATE persons SET phone = $2 WHERE id = $1").bind(person).bind(&norm).execute(&mut *tx).await.map_err(phone_conflict)?;
+        sqlx::query("UPDATE persons SET phone_hash = $2 WHERE id = $1").bind(person).bind(norm.as_deref().map(crypto::blind_index)).execute(&mut *tx).await.map_err(phone_conflict)?;
     }
     // пустая строка очищает необязательное поле, отсутствие аргумента оставляет как есть
     sqlx::query("UPDATE volonteers SET phone = COALESCE($2, phone), faculty = CASE WHEN $3::text IS NULL THEN faculty ELSE NULLIF($3, '') END, student_id = CASE WHEN $4::text IS NULL THEN student_id ELSE NULLIF($4, '') END WHERE id = $1")
-        .bind(vol_id).bind(&phone).bind(&faculty).bind(&student).execute(&mut *tx).await?;
+        .bind(vol_id).bind(crypto::seal_opt(phone.as_deref())).bind(&faculty).bind(crypto::seal_opt(student.as_deref())).execute(&mut *tx).await?;
     audit(&mut tx, Some(v), "profile.update", "volonteer", Some(vol_id), json!({"fields": {"name": first.is_some() || last.is_some(), "phone": phone.is_some(), "faculty": faculty.is_some(), "studentId": student.is_some()}})).await?;
     let row = sqlx::query_as::<_, VolonteerRow>(&format!("{VOL_SELECT} WHERE v.id = $1")).bind(vol_id).fetch_one(&mut *tx).await?;
     tx.commit().await?;
@@ -986,7 +999,7 @@ async fn assemble_markers(ctx: &Context<'_>, rows: Vec<MarkerRow>) -> AppResult<
         let proof = closure.map(|i| ClosureProof::from(ClosureRow { ..clone_closure(&closures[i]) }));
         MapMarker {
             id: gid(r.id), kind: r.kind, status: r.status, title: r.title, description: r.description, lat: r.lat, lng: r.lng,
-            urgency: r.urgency, contact_phone: r.contact_phone, last_seen_date: opt_date(r.last_seen_date), last_seen_location: r.last_seen_location,
+            urgency: r.urgency, contact_phone: crypto::open_opt(r.contact_phone), last_seen_date: opt_date(r.last_seen_date), last_seen_location: r.last_seen_location,
             photos: photos.iter().filter(|(m, _)| *m == r.id).map(|(_, p)| photo_url(*p)).collect(),
             pending_photos: pending.iter().filter(|(m, _)| *m == r.id).map(|(_, p)| photo_url(*p)).collect(),
             closure_proof: proof, created_by: r.created_by.map(gid), created_by_name: r.created_by_name, created_at: rfc3339(r.created_at),
@@ -1037,7 +1050,7 @@ pub async fn create_marker(ctx: &Context<'_>, input: MapMarkerInput) -> AppResul
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO map_markers (type, title, description, lat, lng, urgency, contact_phone, last_seen_date, last_seen_location, created_by, created_by_name)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
-    ).bind(input.kind).bind(&title).bind(&description).bind(lat).bind(lng).bind(input.urgency).bind(&phone).bind(seen_date).bind(&seen_loc)
+    ).bind(input.kind).bind(&title).bind(&description).bind(lat).bind(lng).bind(input.urgency).bind(crypto::seal_opt(phone.as_deref())).bind(seen_date).bind(&seen_loc)
         .bind(v.user_id).bind(&v.full_name).fetch_one(&mut *tx).await?;
     // Предварительная модерация: фото администратора публикуются сразу, остальные ждут проверки
     let status = if v.is_admin() { "APPROVED" } else { "PENDING" };
@@ -1216,22 +1229,31 @@ pub async fn delete_marker(ctx: &Context<'_>, id: Uuid) -> AppResult<bool> {
 }
 
 // ---------- Персональные данные: выгрузка и удаление (152-ФЗ) -------------------------------------------------
+fn open_fields(obj: &mut Value, keys: &[&str]) {
+    for k in keys {
+        if let Some(Value::String(s)) = obj.get(*k) {
+            let plain = crypto::open(s);
+            obj[*k] = if plain.is_empty() { Value::Null } else { Value::String(plain) };
+        }
+    }
+}
+
 /// Все данные пользователя о нём самом одним JSON-документом (право на доступ к данным).
 pub async fn export_my_data(ctx: &Context<'_>) -> AppResult<String> {
     rate_limit(ctx, "export", 10)?;
     let v = need(ctx)?;
     let mut tx = st(ctx).pool.begin().await?;
-    let account: Value = sqlx::query_scalar(
+    let mut account: Value = sqlx::query_scalar(
         "SELECT to_jsonb(t) FROM (SELECT u.email, u.role, u.created_at AS \"registeredAt\", u.last_login_at AS \"lastLoginAt\",
                 u.consent_at AS \"consentAt\", u.consent_version AS \"consentVersion\",
                 p.first_name AS \"firstName\", p.last_name AS \"lastName\", p.middle_name AS \"middleName\", p.birth_date AS \"birthDate\"
            FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1) t",
     ).bind(v.user_id).fetch_one(&mut *tx).await?;
-    let volunteer: Option<Value> = match v.volonteer_id {
+    let mut volunteer: Option<Value> = match v.volonteer_id {
         Some(id) => sqlx::query_scalar("SELECT to_jsonb(t) FROM (SELECT phone, student_id AS \"studentId\", faculty FROM volonteers WHERE id = $1) t").bind(id).fetch_optional(&mut *tx).await?,
         None => None,
     };
-    let organization: Option<Value> = match v.organization_id {
+    let mut organization: Option<Value> = match v.organization_id {
         Some(id) => sqlx::query_scalar("SELECT to_jsonb(t) FROM (SELECT name, inn, contact_person AS \"contactPerson\", email, phone, description FROM organizations WHERE id = $1) t").bind(id).fetch_optional(&mut *tx).await?,
         None => None,
     };
@@ -1245,7 +1267,7 @@ pub async fn export_my_data(ctx: &Context<'_>) -> AppResult<String> {
             SELECT e.title AS event, rv.rating, rv.text, rv.created_at AS \"createdAt\"
               FROM event_reviews rv JOIN events e ON e.id = rv.event_id WHERE rv.volonteer_id = $1) t",
     ).bind(v.volonteer_id).fetch_one(&mut *tx).await?;
-    let markers: Value = sqlx::query_scalar(
+    let mut markers: Value = sqlx::query_scalar(
         "SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.\"createdAt\"), '[]'::jsonb) FROM (
             SELECT m.type, m.status, m.title, m.description, m.lat, m.lng, m.contact_phone AS \"contactPhone\", m.created_at AS \"createdAt\",
                    (SELECT count(*) FROM photos p WHERE p.marker_id = m.id AND p.uploaded_by = $1) AS \"photosUploaded\"
@@ -1255,6 +1277,11 @@ pub async fn export_my_data(ctx: &Context<'_>) -> AppResult<String> {
         "SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.at), '[]'::jsonb) FROM (
             SELECT at, action, entity FROM audit_log WHERE actor_user_id = $1 OR (entity = 'user' AND entity_id = $1) ORDER BY at DESC LIMIT 1000) t",
     ).bind(v.user_id).fetch_one(&mut *tx).await?;
+    // в БД контакты зашифрованы — в выгрузку попадают открытые значения
+    open_fields(&mut account, &["email", "birthDate"]);
+    if let Some(x) = volunteer.as_mut() { open_fields(x, &["phone", "studentId"]); }
+    if let Some(x) = organization.as_mut() { open_fields(x, &["email", "phone"]); }
+    if let Some(list) = markers.as_array_mut() { for m in list { open_fields(m, &["contactPhone"]); } }
     audit(&mut tx, Some(v), "account.export", "user", Some(v.user_id), json!({})).await?;
     tx.commit().await?;
     let doc = json!({
@@ -1312,15 +1339,15 @@ pub async fn delete_my_account(ctx: &Context<'_>, password: &str) -> AppResult<b
         sqlx::query("DELETE FROM event_reviews WHERE volonteer_id = $1").bind(vol).execute(&mut *tx).await?;
         sqlx::query("UPDATE persons SET first_name = $2, last_name = $3, middle_name = NULL, birth_date = NULL WHERE id = (SELECT person_id FROM volonteers WHERE id = $1)")
             .bind(vol).bind(first).bind(last).execute(&mut *tx).await?;
-        sqlx::query("UPDATE volonteers SET email = 'deleted-' || id::text || '@deleted.invalid', phone = '', student_id = NULL, faculty = NULL WHERE id = $1")
+        sqlx::query("UPDATE volonteers SET email = 'deleted-' || id::text || '@deleted.invalid', email_hash = NULL, phone = '', student_id = NULL, faculty = NULL WHERE id = $1")
             .bind(vol).execute(&mut *tx).await?;
     }
     // телефон освобождается: после удаления человек может зарегистрироваться заново
-    sqlx::query("UPDATE persons SET first_name = $2, last_name = $3, middle_name = NULL, birth_date = NULL, phone = NULL WHERE id = $1")
+    sqlx::query("UPDATE persons SET first_name = $2, last_name = $3, middle_name = NULL, birth_date = NULL, phone_hash = NULL WHERE id = $1")
         .bind(person_id).bind(first).bind(last).execute(&mut *tx).await?;
     sqlx::query("UPDATE map_markers SET contact_phone = NULL, created_by_name = $2 WHERE created_by = $1").bind(v.user_id).bind(&tombstone).execute(&mut *tx).await?;
     sqlx::query("UPDATE marker_closures SET submitted_by_name = $2 WHERE submitted_by = $1").bind(v.user_id).bind(&tombstone).execute(&mut *tx).await?;
-    sqlx::query("UPDATE users SET email = 'deleted-' || id::text || '@deleted.invalid', password_hash = '!', token_version = token_version + 1,
+    sqlx::query("UPDATE users SET email = 'deleted-' || id::text || '@deleted.invalid', email_hash = NULL, password_hash = '!', token_version = token_version + 1,
                         failed_logins = 0, locked_until = NULL, deleted_at = now() WHERE id = $1").bind(v.user_id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM email_tokens WHERE user_id = $1").bind(v.user_id).execute(&mut *tx).await?;
     audit(&mut tx, Some(v), "account.delete", "user", Some(v.user_id), json!({})).await?;

@@ -10,7 +10,7 @@ use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use sqlx::{postgres::PgPoolOptions, Connection, PgConnection, PgPool};
 use tower::ServiceExt;
-use volontiers_server::{app, auth::RateLimiter, config::Config, mail::Mailer, seed, MIGRATOR};
+use volontiers_server::{app, auth::RateLimiter, config::Config, crypto, mail::Mailer, seed, MIGRATOR};
 
 struct Env {
     app: Router,
@@ -24,6 +24,7 @@ impl Env {
     async fn new() -> Env { Env::with(|_| {}).await }
 
     async fn with(tweak: impl FnOnce(&mut Config)) -> Env {
+        volontiers_server::crypto::init(&Config::for_tests(String::new()).data_key);
         let admin_url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL (…/postgres) не задана");
         let db = format!("vt_{}", uuid::Uuid::new_v4().simple());
         let mut c = PgConnection::connect(&admin_url).await.unwrap();
@@ -31,6 +32,7 @@ impl Env {
         let url = admin_url.rsplit_once('/').map(|(base, _)| format!("{base}/{db}")).unwrap();
         let pool = PgPoolOptions::new().max_connections(5).connect(&url).await.unwrap();
         MIGRATOR.run(&pool).await.unwrap();
+        volontiers_server::pii::encrypt_existing(&pool).await.unwrap();
         seed::run(&pool, false).await.unwrap();
         let mut cfg = Config::for_tests(url);
         tweak(&mut cfg);
@@ -180,7 +182,7 @@ async fn register_rules() {
     let (m, code) = env.err(None, qo, json!({"e": "own2@x.ru", "n": "клуб «добрые руки»", "ph": "+79000000014"})).await;
     assert_eq!(code, "CONFLICT", "{m}");
     // пароль хранится только как argon2id-хэш
-    let h: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE email = 'new@x.ru'").fetch_one(&env.pool).await.unwrap();
+    let h: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE email_hash = $1").bind(crypto::email_index("new@x.ru")).fetch_one(&env.pool).await.unwrap();
     assert!(h.starts_with("$argon2id$"));
     env.cleanup().await;
 }
@@ -638,7 +640,7 @@ async fn privacy_export_and_account_deletion() {
     assert_eq!(code, "BAD_USER_INPUT");
 
     // персональные данные обезличены; обезличенные часы остаются у организатора
-    let (first, last, birth): (String, String, Option<chrono::NaiveDate>) = sqlx::query_as(
+    let (first, last, birth): (String, String, Option<String>) = sqlx::query_as(
         "SELECT p.first_name, p.last_name, p.birth_date FROM users u JOIN persons p ON p.id = u.person_id WHERE u.deleted_at IS NOT NULL").fetch_one(&env.pool).await.unwrap();
     assert_eq!((first.as_str(), last.as_str()), ("пользователь", "Удалённый"));
     assert!(birth.is_none());
@@ -785,7 +787,7 @@ async fn email_verification_and_password_reset() {
     // --- просроченная ссылка и переход по ссылке сброса подтверждает почту
     env.ok(None, reg, json!({"e": "olga@x.ru", "ph": "+79000000022"})).await;
     env.mailer.take_outbox();
-    sqlx::query("UPDATE users SET email_verified_at = NULL WHERE lower(email) = 'maria@x.ru'").execute(&env.pool).await.unwrap();
+    sqlx::query("UPDATE users SET email_verified_at = NULL WHERE email_hash = $1").bind(crypto::email_index("maria@x.ru")).execute(&env.pool).await.unwrap();
     sqlx::query("DELETE FROM email_tokens").execute(&env.pool).await.unwrap();
     env.ok(None, ask, json!({"e": "olga@x.ru"})).await;
     let mails = env.mailer.take_outbox();
@@ -802,7 +804,8 @@ async fn email_verification_and_password_reset() {
     sqlx::query("UPDATE email_tokens SET created_at = created_at - interval '5 minutes'").execute(&env.pool).await.unwrap();
     env.ok(None, ask, json!({"e": "olga@x.ru"})).await;
     let mails = env.mailer.take_outbox();
-    sqlx::query("UPDATE users SET email = 'olga-new@x.ru' WHERE lower(email) = 'olga@x.ru'").execute(&env.pool).await.unwrap();
+    sqlx::query("UPDATE users SET email = $1, email_hash = $2 WHERE email_hash = $3")
+        .bind(crypto::seal("olga-new@x.ru")).bind(crypto::email_index("olga-new@x.ru")).bind(crypto::email_index("olga@x.ru")).execute(&env.pool).await.unwrap();
     let t = token_from(&mails[0], "reset");
     let (_, code) = env.err(None, reset, json!({"t": t, "p": "An0ther-pass-1"})).await;
     assert_eq!(code, "BAD_USER_INPUT");
@@ -897,7 +900,7 @@ async fn notification_emails_go_only_to_verified_users() {
     assert!(mails[0].to == "volunteer@donstu.ru" && mails[0].subject.contains("Мероприятие отменено") && mails[0].text.contains("Плохая погода"));
 
     // --- без подтверждённой почты письма не отправляются
-    sqlx::query("UPDATE users SET email_verified_at = NULL WHERE email = 'volunteer@donstu.ru'").execute(&env.pool).await.unwrap();
+    sqlx::query("UPDATE users SET email_verified_at = NULL WHERE email_hash = $1").bind(crypto::email_index("volunteer@donstu.ru")).execute(&env.pool).await.unwrap();
     let e3 = mk_event("Акция без подтверждённой почты").await;
     accept_ev(e3.clone()).await;
     env.ok(Some(&v), sub, json!({"v": vol, "e": e3})).await;
@@ -916,8 +919,9 @@ async fn one_person_one_account() {
     let reg = "mutation($e:String!,$ph:String!,$r:UserRole!){register(firstName:\"Олег\",lastName:\"Дублев\",email:$e,phone:$ph,password:\"Str0ng-pass\",role:$r,consent:true){user{id volonteerId organizationId}}}";
     let d = env.ok(None, reg, json!({"e": "oleg@x.ru", "ph": "+7 (900) 555-00-01", "r": "VOLUNTEER"})).await;
     assert!(d["register"]["user"]["volonteerId"].is_string());
-    let stored: String = sqlx::query_scalar("SELECT p.phone FROM persons p JOIN users u ON u.person_id = p.id WHERE u.email = 'oleg@x.ru'").fetch_one(&env.pool).await.unwrap();
-    assert_eq!(stored, "+79005550001", "телефон хранится нормализованным");
+    let stored: String = sqlx::query_scalar("SELECT p.phone_hash FROM persons p JOIN users u ON u.person_id = p.id WHERE u.email_hash = $1")
+        .bind(crypto::email_index("oleg@x.ru")).fetch_one(&env.pool).await.unwrap();
+    assert_eq!(stored, crypto::blind_index("+79005550001"), "хранится только индекс нормализованного номера");
 
     // тот же человек с другой почтой — ни волонтёром, ни организатором, в любой записи номера
     for (email, phone, role) in [("oleg2@x.ru", "8 900 555 00 01", "ORGANIZER"), ("oleg3@x.ru", "9005550001", "VOLUNTEER"), ("oleg4@x.ru", "+7(900)5550001", "ORGANIZER")] {
@@ -925,7 +929,8 @@ async fn one_person_one_account() {
         assert_eq!(code, "CONFLICT", "{email}: {m}");
         assert!(m.contains("одну учётную запись"), "{m}");
     }
-    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM users WHERE email LIKE 'oleg%'").fetch_one(&env.pool).await.unwrap(), 1, "лишних записей не создано");
+    let hashes: Vec<String> = ["oleg@x.ru", "oleg2@x.ru", "oleg3@x.ru", "oleg4@x.ru"].iter().map(|e| crypto::email_index(e)).collect();
+    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM users WHERE email_hash = ANY($1)").bind(&hashes).fetch_one(&env.pool).await.unwrap(), 1, "лишних записей не создано");
     // телефон демо-волонтёра из сида тоже занят
     let (_, code) = env.err(None, reg, json!({"e": "ivanov2@x.ru", "ph": "+7 (909) 400-11-22", "r": "ORGANIZER"})).await;
     assert_eq!(code, "CONFLICT");
@@ -1014,5 +1019,58 @@ async fn organizer_cancellation_needs_admin_approval() {
     for a in ["event.cancel_requested", "event.cancel_rejected", "event.cancel_approved"] {
         assert!(actions.iter().any(|x| x == a), "{a} нет в журнале: {actions:?}");
     }
+    env.cleanup().await;
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Персональные данные хранятся в БД зашифрованными, наружу (тем, кому положено) — открытыми.
+#[tokio::test]
+async fn personal_data_is_encrypted_at_rest() {
+    let env = Env::new().await;
+    let reg = "mutation{register(firstName:\"Анна\",lastName:\"Шифрова\",email:\"Anna@X.ru\",phone:\"+7 (900) 111-22-33\",password:\"Str0ng-pass\",role:VOLUNTEER,consent:true){user{email}}}";
+    let d = env.ok(None, reg, json!({})).await;
+    assert_eq!(d["register"]["user"]["email"], "anna@x.ru");
+
+    // в таблицах нет ни одной открытой почты, телефона, даты рождения или номера билета
+    let leaks: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT 'users.email', count(*) FROM users WHERE email NOT LIKE 'enc:v1:%' AND email NOT LIKE '%@deleted.invalid'
+         UNION ALL SELECT 'volonteers.email', count(*) FROM volonteers WHERE email NOT LIKE 'enc:v1:%'
+         UNION ALL SELECT 'volonteers.phone', count(*) FROM volonteers WHERE phone <> '' AND phone NOT LIKE 'enc:v1:%'
+         UNION ALL SELECT 'volonteers.student_id', count(*) FROM volonteers WHERE student_id IS NOT NULL AND student_id NOT LIKE 'enc:v1:%'
+         UNION ALL SELECT 'organizations.email', count(*) FROM organizations WHERE email <> '' AND email NOT LIKE 'enc:v1:%'
+         UNION ALL SELECT 'organizations.phone', count(*) FROM organizations WHERE phone <> '' AND phone NOT LIKE 'enc:v1:%'
+         UNION ALL SELECT 'persons.birth_date', count(*) FROM persons WHERE birth_date IS NOT NULL AND birth_date NOT LIKE 'enc:v1:%'
+         UNION ALL SELECT 'persons.phone_hash', count(*) FROM persons WHERE phone_hash IS NOT NULL AND phone_hash !~ '^[0-9a-f]{64}$'
+         UNION ALL SELECT 'map_markers.contact_phone', count(*) FROM map_markers WHERE contact_phone IS NOT NULL AND contact_phone NOT LIKE 'enc:v1:%'",
+    ).fetch_all(&env.pool).await.unwrap();
+    for (col, n) in &leaks { assert_eq!(*n, 0, "открытые данные в {col}"); }
+    let dump: String = sqlx::query_scalar("SELECT string_agg(email || ' ' || phone, ' ') FROM volonteers").fetch_one(&env.pool).await.unwrap();
+    assert!(!dump.contains("anna@x.ru") && !dump.contains("111-22-33") && !dump.contains("alex.ivanov"), "{dump}");
+
+    // вход по почте в любом регистре работает через индекс; данные расшифровываются для владельца и админа
+    let anna = env.login("ANNA@x.ru", "Str0ng-pass").await;
+    let me = env.ok(Some(&anna), "{ me { email volonteerId } }", json!({})).await;
+    assert_eq!(me["me"]["email"], "anna@x.ru");
+    let vid = me["me"]["volonteerId"].as_str().unwrap().to_string();
+    let a = env.admin().await;
+    let d = env.ok(Some(&a), "query($id:ID!){ volonteer(id:$id){ email phone } }", json!({"id": vid})).await;
+    assert_eq!(d["volonteer"]["phone"], "+7 (900) 111-22-33");
+    let d = env.ok(Some(&a), "{ volonteers { fullName email birthDate } organizations { email phone } }", json!({})).await;
+    let ivanov = d["volonteers"].as_array().unwrap().iter().find(|v| v["fullName"].as_str().unwrap().starts_with("Иванов")).unwrap();
+    assert_eq!(ivanov["email"], "alex.ivanov@edu.donstu.ru", "контакт из карточки волонтёра расшифрован");
+    assert!(ivanov["birthDate"].as_str().unwrap().len() == 10, "дата рождения расшифрована: {ivanov}");
+    assert!(d["organizations"].as_array().unwrap().iter().all(|o| o["email"].as_str().unwrap().contains('@')));
+    // выгрузка своих данных — открытым текстом
+    let export = env.ok(Some(&anna), "mutation{ exportMyData }", json!({})).await["exportMyData"].as_str().unwrap().to_string();
+    assert!(export.contains("anna@x.ru") && export.contains("111-22-33") && !export.contains("enc:v1:"), "{export}");
+
+    // данные, записанные в обход сервера открытым текстом (как до шифрования), шифруются при старте
+    sqlx::query("UPDATE volonteers SET email = 'legacy@x.ru', email_hash = NULL, phone = '+7 900 000-00-00' WHERE id = $1::uuid").bind(&vid).execute(&env.pool).await.unwrap();
+    let n = volontiers_server::pii::encrypt_existing(&env.pool).await.unwrap();
+    assert!(n >= 2);
+    let (email, hash): (String, Option<String>) = sqlx::query_as("SELECT email, email_hash FROM volonteers WHERE id = $1::uuid").bind(&vid).fetch_one(&env.pool).await.unwrap();
+    assert!(email.starts_with("enc:v1:") && crypto::open(&email) == "legacy@x.ru");
+    assert_eq!(hash, Some(crypto::email_index("legacy@x.ru")));
+    assert_eq!(volontiers_server::pii::encrypt_existing(&env.pool).await.unwrap(), 0, "повторный запуск ничего не меняет");
     env.cleanup().await;
 }

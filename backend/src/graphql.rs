@@ -22,8 +22,8 @@ impl Query {
     async fn demo_accounts(&self, ctx: &Context<'_>) -> bool {
         let s = crate::svc::st(ctx);
         !s.cfg.production
-            && sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = 'admin@donstu.ru' AND deleted_at IS NULL)")
-                .fetch_one(&s.pool).await.unwrap_or(false)
+            && sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM users WHERE email_hash = $1 AND deleted_at IS NULL)")
+                .bind(crate::crypto::email_index("admin@donstu.ru")).fetch_one(&s.pool).await.unwrap_or(false)
     }
     /// Список учётных записей — только администратор.
     async fn users(&self, ctx: &Context<'_>) -> Result<Vec<User>> { Ok(svc::users_list(ctx).await?) }
