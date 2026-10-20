@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
+import * as m from 'motion/react-m';
 import Icon from './Icon.jsx';
+import CountUp from './anim/CountUp.jsx';
 
 export function StatCard({ label, value, sub, tone, marker }) {
   return (
@@ -8,7 +10,7 @@ export function StatCard({ label, value, sub, tone, marker }) {
         {marker && <span className={`color-badge-panel ${marker}`} />}
         <span className="stat-label">{label}</span>
       </div>
-      <span className={`stat-val ${tone ? `tone-${tone}` : ''}`}>{value}</span>
+      <span className={`stat-val ${tone ? `tone-${tone}` : ''}`}><CountUp value={value} /></span>
       {sub && <span className="stat-sub">{sub}</span>}
     </div>
   );
@@ -42,6 +44,7 @@ export function Badge({ className = '', children, icon }) {
  */
 export function Tabs({ tabs, active, onChange, className = '' }) {
   const ref = useRef(null);
+  const indicatorId = `tab-indicator-${useId()}`;
   // На узком экране вкладки прокручиваются — держим активную в зоне видимости.
   // Прокручиваем только сам ряд вкладок, не страницу.
   useEffect(() => {
@@ -67,6 +70,9 @@ export function Tabs({ tabs, active, onChange, className = '' }) {
           {t.icon && <Icon name={t.icon} />}
           <span>{t.label}</span>
           {t.count > 0 && <span className="tab-count">{t.count}</span>}
+          {active === t.id && (
+            <m.span layoutId={indicatorId} className="tab-indicator" transition={{ type: 'spring', stiffness: 500, damping: 38 }} />
+          )}
         </button>
       ))}
     </div>

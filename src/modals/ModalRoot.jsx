@@ -1,4 +1,5 @@
 import { Suspense, lazy } from 'react';
+import { AnimatePresence } from 'motion/react';
 import { useUI } from '../components/UIContext.jsx';
 
 // Модальные окна нужны не на каждом визите — загружаем их при первом открытии.
@@ -19,21 +20,21 @@ const REGISTRY = {
   changePassword: lazy(() => import('./ChangePasswordModal.jsx')),
 };
 
-/** Рендерит текущее модальное окно. Одновременно открыто не больше одного. */
+/**
+ * Рендерит текущее модальное окно. Одновременно открыто не больше одного:
+ * при переключении (вход → регистрация) прежнее окно сначала доигрывает анимацию закрытия.
+ */
 export default function ModalRoot({ onAuthenticated, onLogout }) {
   const { modal, closeModal } = useUI();
-  if (!modal) return null;
-  const Component = REGISTRY[modal.name];
-  if (!Component) return null;
+  const Component = modal ? REGISTRY[modal.name] : null;
+  const key = modal && `${modal.name}-${JSON.stringify(modal.props, (k, v) => (typeof v === 'function' ? undefined : v))}`;
   return (
-    <Suspense fallback={<div className="modal-overlay"><div className="page-loader-spinner" aria-label="Загрузка" /></div>}>
-      <Component
-        key={`${modal.name}-${JSON.stringify(modal.props, (k, v) => (typeof v === 'function' ? undefined : v))}`}
-        {...modal.props}
-        onClose={closeModal}
-        onAuthenticated={onAuthenticated}
-        onLogout={onLogout}
-      />
-    </Suspense>
+    <AnimatePresence mode="wait">
+      {Component && (
+        <Suspense key={key} fallback={<div className="modal-overlay is-loading"><div className="page-loader-spinner" aria-label="Загрузка" /></div>}>
+          <Component {...modal.props} onClose={closeModal} onAuthenticated={onAuthenticated} onLogout={onLogout} />
+        </Suspense>
+      )}
+    </AnimatePresence>
   );
 }

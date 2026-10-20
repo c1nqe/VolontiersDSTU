@@ -71,6 +71,8 @@ code { font-size: 0.85em; background: var(--slate-100); padding: 1px 6px; border
 
 :focus-visible { outline: 3px solid rgb(16 91 216 / 0.45); outline-offset: 2px; }
 
+.count-up { font-variant-numeric: tabular-nums; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
@@ -353,9 +355,14 @@ code { font-size: 0.85em; background: var(--slate-100); padding: 1px 6px; border
   font-size: 0.9rem; font-weight: 600; color: var(--slate-500);
   background: transparent; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px;
   cursor: pointer; transition: color 0.15s ease, border-color 0.15s ease;
+  position: relative;
 }
 .tab-btn:hover { color: var(--slate-800); }
-.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-btn.active { color: var(--primary); }
+.tab-indicator {
+  position: absolute; left: 0; right: 0; bottom: -2px; height: 2px;
+  background: var(--primary); border-radius: 2px;
+}
 .tab-count {
   min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full);
   background: var(--warning-light); color: #b45309; font-size: 0.7rem; font-weight: 700;
@@ -521,19 +528,19 @@ code { font-size: 0.85em; background: var(--slate-100); padding: 1px 6px; border
   background: rgb(15 23 42 / 0.55); backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center;
   padding: 1rem;
-  animation: fadeIn 0.15s ease;
 }
+/* пока код окна загружается — простое появление; само окно анимирует motion */
+.modal-overlay.is-loading { animation: fadeIn 0.15s ease; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .modal-dialog {
   background: #fff; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
   width: 100%; max-width: 560px;
   max-height: calc(100dvh - 2rem);
   display: flex; flex-direction: column; overflow: hidden;
-  animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, opacity;
 }
 .modal-dialog:focus { outline: none; }
 .modal-lg { max-width: 680px; }
-@keyframes modalPop { from { transform: translateY(8px) scale(0.98); opacity: 0; } to { transform: none; opacity: 1; } }
 .modal-header {
   padding: 1.1rem 1.5rem; border-bottom: 1px solid var(--border-color);
   display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-shrink: 0;
@@ -618,7 +625,6 @@ code { font-size: 0.85em; background: var(--slate-100); padding: 1px 6px; border
   background: var(--slate-900); color: #fff;
   padding: 0.8rem 1.1rem; border-radius: var(--radius-md); font-size: 0.875rem;
   box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 0.6rem;
-  animation: slideUp 0.25s ease-out;
 }
 .toast.success { background: #065f46; }
 .toast.error { background: #991b1b; }

@@ -102,7 +102,7 @@ npm run dev
 | `cd backend && cargo test` | Тесты сервера на настоящей PostgreSQL (нужна `TEST_DATABASE_URL`, см. [docs/BACKEND.md](docs/BACKEND.md#тесты)) |
 
 ## Как устроен проект
-**Стек.** Фронтенд: React 18, Vite 5, react-leaflet (карта на OpenStreetMap), Vitest и jsdom. CSS пишется вручную, без UI-фреймворков, дизайн строится на CSS-переменных в `src/styles/index.css`. Бэкенд: Rust, axum, async-graphql, sqlx, PostgreSQL 16.
+**Стек.** Фронтенд: React 18, Vite 5, react-leaflet (карта на OpenStreetMap), Vitest и jsdom. CSS пишется вручную, без UI-фреймворков, дизайн строится на CSS-переменных в `src/styles/index.css`. Анимации: [motion](https://motion.dev) — окна, уведомления, индикатор вкладок, появление карточек (через `LazyMotion`, полный набор грузится отдельным чанком); [anime.js](https://animejs.com) — счётчики статистики и появление приветственного блока (`src/components/anim/`). При системной настройке «уменьшить движение» анимации отключаются. Бэкенд: Rust, axum, async-graphql, sqlx, PostgreSQL 16.
 
 ```
 VolontiersDSTU/

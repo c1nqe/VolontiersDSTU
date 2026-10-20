@@ -1,7 +1,9 @@
-import { useDeferredValue, useState } from 'react';
+import { useDeferredValue, useRef, useState } from 'react';
 import Icon from '../components/Icon.jsx';
 import EventCard from '../components/EventCard.jsx';
 import { EmptyState, SectionHeader } from '../components/Common.jsx';
+import CountUp from '../components/anim/CountUp.jsx';
+import useHeroIntro from '../components/anim/useHeroIntro.js';
 import { useRun, useStore } from '../store/StoreContext.jsx';
 import { useUI } from '../components/UIContext.jsx';
 import { REQUEST_STATUS, pluralize } from '../utils/format.js';
@@ -14,6 +16,8 @@ export default function PublicView() {
   const { openModal, showToast } = useUI();
   const run = useRun();
   const [query, setQuery] = useState('');
+  const heroRef = useRef(null);
+  useHeroIntro(heroRef);
   const user = store.getCurrentUser();
   const volunteer = user?.role === 'VOLUNTEER' ? store.getActiveVolunteer() : null;
   const myRequests = volunteer ? store.getRequests().filter((r) => r.volonteerId === volunteer.id) : [];
@@ -47,7 +51,7 @@ export default function PublicView() {
 
   return (
     <div className="role-view">
-      <section className="guest-hero-banner">
+      <section className="guest-hero-banner" ref={heroRef}>
         <div className="hero-content">
           <div className="hero-badge"><Icon name="shield" /> <span>Волонтёрский центр ДГТУ «Горящие сердца»</span></div>
           <h2 className="hero-title">Делай добрые дела вместе с опорным университетом</h2>
@@ -66,10 +70,10 @@ export default function PublicView() {
           )}
         </div>
         <div className="hero-stats">
-          <div className="hero-stat-item"><span className="stat-number">{accepted.length}</span><span className="stat-caption">Активных событий</span></div>
-          <div className="hero-stat-item"><span className="stat-number">1 200+</span><span className="stat-caption">Волонтёров ДГТУ</span></div>
-          <div className="hero-stat-item"><span className="stat-number">14</span><span className="stat-caption">Организаций</span></div>
-          <div className="hero-stat-item"><span className="stat-number">{totalHours}+ ч</span><span className="stat-caption">Часов помощи</span></div>
+          <div className="hero-stat-item"><span className="stat-number"><CountUp value={accepted.length} /></span><span className="stat-caption">Активных событий</span></div>
+          <div className="hero-stat-item"><span className="stat-number"><CountUp value="1 200+" duration={1600} /></span><span className="stat-caption">Волонтёров ДГТУ</span></div>
+          <div className="hero-stat-item"><span className="stat-number"><CountUp value={14} /></span><span className="stat-caption">Организаций</span></div>
+          <div className="hero-stat-item"><span className="stat-number"><CountUp value={`${totalHours}+ ч`} duration={1400} /></span><span className="stat-caption">Часов помощи</span></div>
         </div>
       </section>
 

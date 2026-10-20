@@ -1,3 +1,4 @@
+import * as m from 'motion/react-m';
 import Icon from './Icon.jsx';
 import { RatingPill } from './reviews/ReviewParts.jsx';
 import { shortName } from './reviews/reviewUtils.js';
@@ -23,7 +24,14 @@ export default function EventCard({
   const showRating = onShowReviews && (event.status === 'CLOSED' || event.reviewsCount > 0);
 
   return (
-    <article className="event-card">
+    <m.article
+      className="event-card"
+      initial={{ opacity: 0, y: 18 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.15 }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+      whileHover={{ y: -4, transition: { type: 'spring', stiffness: 400, damping: 26 } }}
+    >
       <header className="event-header">
         <span className={`badge ${status.badge}`}>{statusLabel || status.label}</span>
         <span className="event-date"><Icon name="calendar" /> {formatDate(event.startDate)}
@@ -77,6 +85,6 @@ export default function EventCard({
         <span className="event-footer-info">{footerInfo}</span>
         <div className="event-footer-actions">{actions}</div>
       </footer>
-    </article>
+    </m.article>
   );
 }

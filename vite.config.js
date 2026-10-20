@@ -24,6 +24,9 @@ export default defineConfig({
           if (/[\\/](maplibre-gl|@maplibre)[\\/]/.test(id)) return 'vendor-maplibre';
           if (/[\\/](leaflet|react-leaflet|@react-leaflet)[\\/]/.test(id)) return 'vendor-leaflet';
           if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react';
+          // motion: ядро — в общем чанке, полный набор возможностей (LazyMotion) — отдельным чанком по требованию
+          if (/[\\/](motion|motion-dom|motion-utils|framer-motion)[\\/]/.test(id)) return undefined;
+          if (/[\\/]animejs[\\/]/.test(id)) return 'vendor-anime';
           return 'vendor';
         },
       },
