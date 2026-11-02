@@ -48,7 +48,24 @@ fn bearer(headers: &HeaderMap) -> Option<String> {
 
 fn client_ip(cfg: &Config, headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
     if cfg.trust_proxy {
-        if let Some(ip) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()).and_then(|v| v.split(',').next()).and_then(|v| v.trim().parse().ok()) {
+        // 1. Приоритет X-Real-IP: обратный прокси безусловно перезаписывает его реальным адресом клиента.
+        if let Some(ip) = headers
+            .get("x-real-ip")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse().ok())
+        {
+            return ip;
+        }
+        // 2. В X-Forwarded-For: если клиент передал свой поддельный заголовок, обратный прокси
+        // дописывает настоящий адрес в конец цепочки (client, proxy1...).
+        // Берём крайний правый корректный IP, добавленный ближайшим доверенным прокси, а не крайний левый,
+        // который может контролироваться атакующим.
+        if let Some(ip) = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.rsplit(',').next())
+            .and_then(|v| v.trim().parse().ok())
+        {
             return ip;
         }
     }
@@ -202,3 +219,34 @@ pub fn router(state: AppState) -> Router {
 
 #[allow(dead_code)]
 fn _role(_: UserRole, _: Method) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_ip_trust_proxy_defense_against_spoofing() {
+        let mut cfg = Config::for_tests("postgres://localhost/test".into());
+        let peer: SocketAddr = "127.0.0.1:50000".parse().unwrap();
+
+        // 1. Без trust_proxy берётся адрес сокета peer
+        cfg.trust_proxy = false;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", HeaderValue::from_static("1.1.1.1, 203.0.113.195"));
+        assert_eq!(client_ip(&cfg, &headers, peer), peer.ip());
+
+        // 2. С trust_proxy при подделке левого IP берётся правый (доверенный от ближайшего прокси)
+        cfg.trust_proxy = true;
+        assert_eq!(
+            client_ip(&cfg, &headers, peer),
+            "203.0.113.195".parse::<IpAddr>().unwrap()
+        );
+
+        // 3. X-Real-IP имеет наивысший приоритет
+        headers.insert("x-real-ip", HeaderValue::from_static("198.51.100.42"));
+        assert_eq!(
+            client_ip(&cfg, &headers, peer),
+            "198.51.100.42".parse::<IpAddr>().unwrap()
+        );
+    }
+}

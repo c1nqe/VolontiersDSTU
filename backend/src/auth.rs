@@ -1,6 +1,12 @@
 //! Аутентификация: argon2id, JWT (HS256) с отзывом через token_version,
 //! роли и «зритель» (Viewer) — тот, кто выполняет запрос.
-use std::{collections::HashMap, net::IpAddr, sync::Mutex, time::{Duration, Instant}};
+use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
+    hash::{Hash, Hasher},
+    net::IpAddr,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -137,19 +143,36 @@ pub async fn viewer_from_token(pool: &PgPool, secret: &[u8], token: &str) -> Opt
     Some(Viewer { user_id: id, role, organization_id: org, volonteer_id: vol, full_name: format!("{last} {first}"), email_verified: verified, exp: claims.exp })
 }
 
-// ---------- Ограничитель частоты (окно в памяти) ----------------------------
+const NUM_SHARDS: usize = 64;
+
+// ---------- Ограничитель частоты (шардированное окно в памяти) ---------------
+/// Шардированный по хэшу (IP, ключ) ограничитель частоты.
+/// Разделение на 64 независимых сегмента устраняет блокировки (lock contention)
+/// при параллельных запросах с разных IP и к разным действиям.
 pub struct RateLimiter {
-    hits: Mutex<HashMap<(IpAddr, &'static str), (u32, Instant)>>,
+    shards: [Mutex<HashMap<(IpAddr, &'static str), (u32, Instant)>>; NUM_SHARDS],
 }
 
 impl RateLimiter {
-    pub fn new() -> Self { Self { hits: Mutex::new(HashMap::new()) } }
+    pub fn new() -> Self {
+        Self {
+            shards: std::array::from_fn(|_| Mutex::new(HashMap::new())),
+        }
+    }
+
+    fn shard_index(ip: &IpAddr, key: &'static str) -> usize {
+        let mut hasher = DefaultHasher::new();
+        ip.hash(&mut hasher);
+        key.hash(&mut hasher);
+        (hasher.finish() as usize) % NUM_SHARDS
+    }
 
     /// true — запрос разрешён. limit запросов за window на (ip, ключ).
     pub fn allow(&self, ip: IpAddr, key: &'static str, limit: u32, window: Duration) -> bool {
-        let mut map = self.hits.lock().unwrap_or_else(|e| e.into_inner());
+        let idx = Self::shard_index(&ip, key);
+        let mut map = self.shards[idx].lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
-        if map.len() > 10_000 {
+        if map.len() > 256 {
             map.retain(|_, (_, started)| now.duration_since(*started) < window);
         }
         let entry = map.entry((ip, key)).or_insert((0, now));
@@ -162,3 +185,41 @@ impl RateLimiter {
 }
 
 impl Default for RateLimiter { fn default() -> Self { Self::new() } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_limiter_allows_up_to_limit_and_blocks_excess() {
+        let limiter = RateLimiter::new();
+        let ip: IpAddr = "192.0.2.1".parse().unwrap();
+        for _ in 0..5 {
+            assert!(limiter.allow(ip, "login", 5, Duration::from_secs(60)));
+        }
+        assert!(!limiter.allow(ip, "login", 5, Duration::from_secs(60)));
+
+        let other_ip: IpAddr = "192.0.2.2".parse().unwrap();
+        assert!(limiter.allow(other_ip, "login", 5, Duration::from_secs(60)));
+
+        assert!(limiter.allow(ip, "register", 5, Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn rate_limiter_concurrent_access() {
+        use std::thread;
+
+        let limiter = RateLimiter::new();
+        let r = &limiter;
+        thread::scope(|s| {
+            for i in 0..32 {
+                s.spawn(move || {
+                    let ip: IpAddr = format!("10.0.0.{i}").parse().unwrap();
+                    for _ in 0..10 {
+                        let _ = r.allow(ip, "ping", 20, Duration::from_secs(1));
+                    }
+                });
+            }
+        });
+    }
+}
