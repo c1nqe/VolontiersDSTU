@@ -5,7 +5,7 @@ use async_graphql::{Context, ID};
 use chrono::{NaiveDate, Utc};
 use serde_json::{json, Value};
 use sqlx::{PgConnection, PgPool};
-use uuid::Uuid;
+use crate::id::EntityId;
 
 use crate::{
     app::AppState,
@@ -39,7 +39,7 @@ fn set_cookie(ctx: &Context<'_>, value: String) {
 }
 
 // ---------- Журнал аудита ------------------------------------------------------------
-pub async fn audit(conn: &mut PgConnection, v: Option<&Viewer>, action: &str, entity: &str, id: Option<Uuid>, details: Value) -> AppResult<()> {
+pub async fn audit(conn: &mut PgConnection, v: Option<&Viewer>, action: &str, entity: &str, id: Option<EntityId>, details: Value) -> AppResult<()> {
     sqlx::query("INSERT INTO audit_log (actor_user_id, actor_role, action, entity, entity_id, details) VALUES ($1,$2,$3,$4,$5,$6)")
         .bind(v.map(|v| v.user_id))
         .bind(v.map(|v| v.role))
@@ -103,8 +103,8 @@ pub fn validate_inn(raw: &str) -> AppResult<String> {
 const PHONE_TAKEN: &str = "Этот номер телефона уже привязан к другой учётной записи. Один человек может иметь только одну учётную запись — войдите в неё или восстановите пароль.";
 
 /// phone — нормализованный номер; в БД сравнивается только его слепой индекс.
-async fn ensure_phone_free(conn: &mut PgConnection, phone: &str, except_person: Option<Uuid>) -> AppResult<()> {
-    let taken: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM persons WHERE phone_hash = $1 AND ($2::uuid IS NULL OR id <> $2))")
+async fn ensure_phone_free(conn: &mut PgConnection, phone: &str, except_person: Option<EntityId>) -> AppResult<()> {
+    let taken: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM persons WHERE phone_hash = $1 AND ($2::text IS NULL OR id <> $2))")
         .bind(crypto::blind_index(phone)).bind(except_person).fetch_one(conn).await?;
     if taken { Err(AppError::conflict(PHONE_TAKEN)) } else { Ok(()) }
 }
@@ -118,7 +118,7 @@ fn finite(x: f64, field: &str) -> AppResult<f64> {
 }
 
 // ---------- Пользователи и сессии ---------------------------------------------------------------
-pub async fn user_by_id(pool: &PgPool, id: Uuid) -> AppResult<User> {
+pub async fn user_by_id(pool: &PgPool, id: EntityId) -> AppResult<User> {
     let row = sqlx::query_as::<_, UserRow>(&format!("{USER_SELECT} WHERE u.id = $1")).bind(id).fetch_optional(pool).await?;
     row.map(User::from).ok_or_else(|| AppError::not_found("Пользователь не найден"))
 }
@@ -136,7 +136,7 @@ pub async fn users_list(ctx: &Context<'_>) -> AppResult<Vec<User>> {
     Ok(rows.into_iter().map(User::from).collect())
 }
 
-fn start_session(ctx: &Context<'_>, user_id: Uuid, token_version: i32) -> AppResult<(String, String)> {
+fn start_session(ctx: &Context<'_>, user_id: EntityId, token_version: i32) -> AppResult<(String, String)> {
     let s = st(ctx);
     let (token, exp) = auth::issue_token(&s.cfg.jwt_secret, user_id, token_version, s.cfg.session_hours)?;
     set_cookie(ctx, auth::session_cookie(&token, s.cfg.session_hours * 3600, s.cfg.cookie_secure));
@@ -167,7 +167,7 @@ fn hash_token(token: &str) -> String {
 
 /// Создаёт одноразовую ссылку. Прежние неиспользованные токены того же вида аннулируются.
 /// Возвращает None, если письмо такого вида уже отправляли только что.
-async fn issue_email_token(conn: &mut PgConnection, user_id: Uuid, purpose: &str, email: &str, ttl_minutes: i32) -> AppResult<Option<String>> {
+async fn issue_email_token(conn: &mut PgConnection, user_id: EntityId, purpose: &str, email: &str, ttl_minutes: i32) -> AppResult<Option<String>> {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use rand::RngCore;
     let recent: bool = sqlx::query_scalar(
@@ -185,7 +185,7 @@ async fn issue_email_token(conn: &mut PgConnection, user_id: Uuid, purpose: &str
 }
 
 /// Письмо со ссылкой подтверждения. Ошибки отправки не должны ломать основное действие.
-async fn send_verification(ctx: &Context<'_>, user_id: Uuid) {
+async fn send_verification(ctx: &Context<'_>, user_id: EntityId) {
     let s = st(ctx);
     if !s.mailer.enabled() { return; }
     let res: AppResult<()> = async {
@@ -212,7 +212,7 @@ fn opened(list: Vec<Recipient>) -> Vec<Recipient> {
     list.into_iter().map(|r| Recipient { email: crypto::open(&r.email), first_name: r.first_name }).filter(|r| !r.email.is_empty()).collect()
 }
 
-async fn recipients_by_user(s: &AppState, user_id: Uuid) -> Vec<Recipient> {
+async fn recipients_by_user(s: &AppState, user_id: EntityId) -> Vec<Recipient> {
     sqlx::query_as("SELECT u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1 AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
         .bind(user_id).fetch_all(&s.pool).await.map(opened).unwrap_or_default()
 }
@@ -222,13 +222,13 @@ async fn recipients_admins(s: &AppState) -> Vec<Recipient> {
         .fetch_all(&s.pool).await.map(opened).unwrap_or_default()
 }
 
-async fn recipients_by_volonteer(conn: &mut PgConnection, vol: Uuid) -> Vec<Recipient> {
+async fn recipients_by_volonteer(conn: &mut PgConnection, vol: EntityId) -> Vec<Recipient> {
     sqlx::query_as("SELECT u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.volonteer_id = $1 AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
         .bind(vol).fetch_all(conn).await.map(opened).unwrap_or_default()
 }
 
 /// Волонтёры (с подтверждённой почтой), у которых заявки на событие ещё не закрыты.
-async fn recipients_open_requests(conn: &mut PgConnection, event_id: Uuid) -> Vec<Recipient> {
+async fn recipients_open_requests(conn: &mut PgConnection, event_id: EntityId) -> Vec<Recipient> {
     sqlx::query_as("SELECT DISTINCT u.email, p.first_name FROM volonteer_event_requests r JOIN users u ON u.volonteer_id = r.volonteer_id JOIN persons p ON p.id = u.person_id
                      WHERE r.event_id = $1 AND r.status IN ('OPEN','ACCEPTED') AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL")
         .bind(event_id).fetch_all(conn).await.map(opened).unwrap_or_default()
@@ -255,7 +255,7 @@ pub async fn request_password_reset(ctx: &Context<'_>, email: &str) -> AppResult
     }
     let email = email.trim().to_lowercase();
     // Ответ одинаков для существующих и несуществующих адресов — перебором узнать, кто зарегистрирован, нельзя.
-    let row: Option<(Uuid, String, String)> = sqlx::query_as(
+    let row: Option<(EntityId, String, String)> = sqlx::query_as(
         "SELECT u.id, u.email, p.first_name FROM users u JOIN persons p ON p.id = u.person_id WHERE u.email_hash = $1 AND u.deleted_at IS NULL",
     ).bind(crypto::email_index(&email)).fetch_optional(&s.pool).await?;
     if let Some((id, addr, name)) = row {
@@ -277,7 +277,7 @@ pub async fn reset_password(ctx: &Context<'_>, token: &str, new_password: &str) 
     rate_limit(ctx, "reset_confirm", 10)?;
     let pool = &st(ctx).pool;
     let mut tx = pool.begin().await?;
-    let row: Option<(Uuid, Uuid, String)> = sqlx::query_as(
+    let row: Option<(EntityId, EntityId, String)> = sqlx::query_as(
         "SELECT t.id, u.id, u.email FROM email_tokens t JOIN users u ON u.id = t.user_id
           WHERE t.token_hash = $1 AND t.purpose = 'RESET_PASSWORD' AND t.used_at IS NULL AND t.expires_at > now()
             AND u.deleted_at IS NULL AND u.email_hash = t.sent_to
@@ -302,7 +302,7 @@ pub async fn reset_password(ctx: &Context<'_>, token: &str, new_password: &str) 
 pub async fn verify_email(ctx: &Context<'_>, token: &str) -> AppResult<bool> {
     rate_limit(ctx, "verify", 20)?;
     let mut tx = st(ctx).pool.begin().await?;
-    let row: Option<(Uuid, Uuid)> = sqlx::query_as(
+    let row: Option<(EntityId, EntityId)> = sqlx::query_as(
         "SELECT t.id, u.id FROM email_tokens t JOIN users u ON u.id = t.user_id
           WHERE t.token_hash = $1 AND t.purpose = 'VERIFY_EMAIL' AND t.used_at IS NULL AND t.expires_at > now()
             AND u.deleted_at IS NULL AND u.email_hash = t.sent_to
@@ -337,7 +337,7 @@ pub async fn login(ctx: &Context<'_>, email: &str, password: &str) -> AppResult<
     let email = email.trim().to_lowercase();
     if password.len() > 1024 { return Err(AppError::validation(BAD_CREDENTIALS)); }
 
-    let row: Option<(Uuid, String, i32, i16, Option<chrono::DateTime<Utc>>)> = sqlx::query_as(
+    let row: Option<(EntityId, String, i32, i16, Option<chrono::DateTime<Utc>>)> = sqlx::query_as(
         "SELECT id, password_hash, token_version, failed_logins, locked_until FROM users WHERE email_hash = $1 AND deleted_at IS NULL",
     ).bind(crypto::email_index(&email)).fetch_optional(pool).await?;
 
@@ -398,7 +398,7 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
     auth::validate_password(password, &email)?;
     let pool = &st(ctx).pool;
     let email_hash = crypto::email_index(&email);
-    let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM users WHERE email_hash = $1").bind(&email_hash).fetch_optional(pool).await?;
+    let exists: Option<(EntityId,)> = sqlx::query_as("SELECT id FROM users WHERE email_hash = $1").bind(&email_hash).fetch_optional(pool).await?;
     if exists.is_some() {
         return Err(AppError::conflict("Пользователь с таким адресом электронной почты уже зарегистрирован!"));
     }
@@ -408,9 +408,9 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
     let hash = tokio::task::spawn_blocking(move || auth::hash_password(&pw)).await.map_err(|e| anyhow::anyhow!("join: {e}"))??;
 
     let mut tx = pool.begin().await?;
-    let person_id: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, phone_hash) VALUES ($1,$2,$3) RETURNING id")
+    let person_id: EntityId = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, phone_hash) VALUES ($1,$2,$3) RETURNING id")
         .bind(&first).bind(&last).bind(crypto::blind_index(&phone)).fetch_one(&mut *tx).await.map_err(phone_conflict)?;
-    let (mut org, mut vol): (Option<Uuid>, Option<Uuid>) = (None, None);
+    let (mut org, mut vol): (Option<EntityId>, Option<EntityId>) = (None, None);
     match role {
         UserRole::Volunteer => {
             vol = Some(sqlx::query_scalar("INSERT INTO volonteers (person_id, email, email_hash, phone) VALUES ($1,$2,$3,$4) RETURNING id")
@@ -425,10 +425,10 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
                 if n.chars().count() < 2 { return Err(AppError::validation("Название организации — от 2 до 200 символов")); }
             }
             let mut name = explicit.clone().unwrap_or_else(|| format!("Организация: {last} {first}"));
-            let taken: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM organizations WHERE lower(name) = lower($1)").bind(&name).fetch_optional(&mut *tx).await?;
+            let taken: Option<(EntityId,)> = sqlx::query_as("SELECT id FROM organizations WHERE lower(name) = lower($1)").bind(&name).fetch_optional(&mut *tx).await?;
             if taken.is_some() {
                 if explicit.is_some() { return Err(AppError::conflict("Организация с таким названием уже зарегистрирована")); }
-                name = format!("{name} №{}", &Uuid::new_v4().simple().to_string()[..6]);
+                name = format!("{name} №{}", &uuid::Uuid::new_v4().simple().to_string()[..6]);
             }
             org = Some(sqlx::query_scalar(
                 "INSERT INTO organizations (name, contact_person, email, phone, inn, description) VALUES ($1,$2,$3,$4,$5,'Новый организатор социально-волонтёрских инициатив') RETURNING id",
@@ -436,7 +436,7 @@ pub async fn register(ctx: &Context<'_>, first: &str, last: &str, email: &str, p
         }
         UserRole::Admin => unreachable!(),
     }
-    let user_id: Uuid = sqlx::query_scalar(
+    let user_id: EntityId = sqlx::query_scalar(
         "INSERT INTO users (person_id, email, email_hash, password_hash, role, organization_id, volonteer_id, consent_version, consent_at) VALUES ($1,$2,$8,$3,$4,$5,$6,$7,now()) RETURNING id",
     ).bind(person_id).bind(crypto::seal(&email)).bind(&hash).bind(role).bind(org).bind(vol).bind(PRIVACY_POLICY_VERSION).bind(&email_hash).fetch_one(&mut *tx).await
         .map_err(|e| match AppError::from(e) {
@@ -492,7 +492,7 @@ pub async fn session(ctx: &Context<'_>) -> AppResult<Option<Session>> {
 }
 
 // ---------- Организации ---------------------------------------------------------------------------
-fn reveal_org(v: Option<&Viewer>, org: Uuid) -> bool { v.map(|v| v.can_act_for_org(org)).unwrap_or(false) }
+fn reveal_org(v: Option<&Viewer>, org: EntityId) -> bool { v.map(|v| v.can_act_for_org(org)).unwrap_or(false) }
 
 pub async fn organizations_list(ctx: &Context<'_>) -> AppResult<Vec<Organization>> {
     let rows = sqlx::query_as::<_, OrganizationRow>(&format!("{ORG_SELECT} ORDER BY created_at, name")).fetch_all(&st(ctx).pool).await?;
@@ -500,7 +500,7 @@ pub async fn organizations_list(ctx: &Context<'_>) -> AppResult<Vec<Organization
     Ok(rows.into_iter().map(|r| { let reveal = reveal_org(v, r.id); Organization::from_row(r, reveal) }).collect())
 }
 
-pub async fn organization_by_id(ctx: &Context<'_>, id: Uuid) -> AppResult<Organization> {
+pub async fn organization_by_id(ctx: &Context<'_>, id: EntityId) -> AppResult<Organization> {
     let row = sqlx::query_as::<_, OrganizationRow>(&format!("{ORG_SELECT} WHERE id = $1")).bind(id).fetch_optional(&st(ctx).pool).await?
         .ok_or_else(|| AppError::not_found("Организация не найдена"))?;
     let reveal = reveal_org(viewer(ctx), row.id);
@@ -528,14 +528,14 @@ pub async fn register_organization(ctx: &Context<'_>, name: &str, contact: &str,
 }
 
 // ---------- Волонтёры -------------------------------------------------------------------------------
-async fn org_has_volonteer(pool: &PgPool, org: Uuid, vol: Uuid) -> AppResult<bool> {
+async fn org_has_volonteer(pool: &PgPool, org: EntityId, vol: EntityId) -> AppResult<bool> {
     Ok(sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM volonteer_event_requests r JOIN events e ON e.id = r.event_id
                          WHERE e.organization_id = $1 AND r.volonteer_id = $2 AND r.status <> 'CANCELLED')",
     ).bind(org).bind(vol).fetch_one(pool).await?)
 }
 
-async fn vol_access(ctx: &Context<'_>, vol: Uuid) -> AppResult<VolAccess> {
+async fn vol_access(ctx: &Context<'_>, vol: EntityId) -> AppResult<VolAccess> {
     let Some(v) = viewer(ctx) else { return Ok(VolAccess::Public) };
     if v.can_act_for_volonteer(vol) { return Ok(VolAccess::Full); }
     if v.role == UserRole::Organizer {
@@ -546,7 +546,7 @@ async fn vol_access(ctx: &Context<'_>, vol: Uuid) -> AppResult<VolAccess> {
     Ok(VolAccess::Public)
 }
 
-pub async fn volonteer_by_id(ctx: &Context<'_>, id: Uuid) -> AppResult<Volonteer> {
+pub async fn volonteer_by_id(ctx: &Context<'_>, id: EntityId) -> AppResult<Volonteer> {
     let row = sqlx::query_as::<_, VolonteerRow>(&format!("{VOL_SELECT} WHERE v.id = $1")).bind(id).fetch_optional(&st(ctx).pool).await?
         .ok_or_else(|| AppError::not_found("Волонтёр не найден"))?;
     let access = vol_access(ctx, id).await?;
@@ -587,9 +587,9 @@ pub async fn register_volonteer(ctx: &Context<'_>, full_name: &str, email: &str,
     let mut tx = st(ctx).pool.begin().await?;
     ensure_phone_free(&mut tx, &phone_norm, None).await?;
     let birth = birth.map(|d| crypto::seal(&d.format("%Y-%m-%d").to_string()));
-    let person_id: Uuid = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, middle_name, birth_date, phone_hash) VALUES ($1,$2,$3,$4,$5) RETURNING id")
+    let person_id: EntityId = sqlx::query_scalar("INSERT INTO persons (first_name, last_name, middle_name, birth_date, phone_hash) VALUES ($1,$2,$3,$4,$5) RETURNING id")
         .bind(&first).bind(&last).bind(&middle).bind(birth).bind(crypto::blind_index(&phone_norm)).fetch_one(&mut *tx).await.map_err(phone_conflict)?;
-    let id: Uuid = sqlx::query_scalar("INSERT INTO volonteers (person_id, email, email_hash, phone, student_id, faculty) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
+    let id: EntityId = sqlx::query_scalar("INSERT INTO volonteers (person_id, email, email_hash, phone, student_id, faculty) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
         .bind(person_id).bind(crypto::seal(&email)).bind(crypto::email_index(&email)).bind(crypto::seal(&phone)).bind(crypto::seal_opt(student_id.as_deref())).bind(&faculty).fetch_one(&mut *tx).await
         .map_err(|e| match AppError::from(e) { AppError::Conflict(_) => AppError::conflict("Волонтёр с таким адресом электронной почты уже существует"), o => o })?;
     audit(&mut tx, Some(v), "volonteer.register", "volonteer", Some(id), json!({})).await?;
@@ -613,7 +613,7 @@ pub async fn update_my_profile(ctx: &Context<'_>, first_name: Option<String>, la
     if let Some(p) = &phone {
         // новый телефон тоже не должен принадлежать другой учётной записи; пустая строка отвязывает номер
         let norm = if p.is_empty() { None } else { Some(normalize_phone(p)?) };
-        let person: Uuid = sqlx::query_scalar("SELECT person_id FROM volonteers WHERE id = $1").bind(vol_id).fetch_one(&mut *tx).await?;
+        let person: EntityId = sqlx::query_scalar("SELECT person_id FROM volonteers WHERE id = $1").bind(vol_id).fetch_one(&mut *tx).await?;
         if let Some(n) = &norm { ensure_phone_free(&mut tx, n, Some(person)).await?; }
         sqlx::query("UPDATE persons SET phone_hash = $2 WHERE id = $1").bind(person).bind(norm.as_deref().map(crypto::blind_index)).execute(&mut *tx).await.map_err(phone_conflict)?;
     }
@@ -627,12 +627,12 @@ pub async fn update_my_profile(ctx: &Context<'_>, first_name: Option<String>, la
 }
 
 // ---------- События --------------------------------------------------------------------------------------
-async fn fetch_event(conn: &mut PgConnection, id: Uuid) -> AppResult<Event> {
+async fn fetch_event(conn: &mut PgConnection, id: EntityId) -> AppResult<Event> {
     sqlx::query_as::<_, EventRow>(&format!("{EVENT_SELECT} WHERE e.id = $1")).bind(id).fetch_optional(conn).await?
         .map(Event::from).ok_or_else(|| AppError::not_found("Событие не найдено"))
 }
 
-fn event_visible(v: Option<&Viewer>, status: EventStatus, org: Uuid) -> bool {
+fn event_visible(v: Option<&Viewer>, status: EventStatus, org: EntityId) -> bool {
     matches!(status, EventStatus::Accepted | EventStatus::Closed) || v.map(|v| v.can_act_for_org(org)).unwrap_or(false)
 }
 
@@ -648,13 +648,13 @@ pub async fn events_list(ctx: &Context<'_>, status: Option<EventStatus>) -> AppR
     Ok(rows.into_iter().map(Event::from).collect())
 }
 
-pub async fn events_of_org(ctx: &Context<'_>, org: Uuid) -> AppResult<Vec<Event>> {
+pub async fn events_of_org(ctx: &Context<'_>, org: EntityId) -> AppResult<Vec<Event>> {
     let all = events_list(ctx, None).await?;
     let org = gid(org);
     Ok(all.into_iter().filter(|e| e.organization_id == org).collect())
 }
 
-pub async fn event_by_id(ctx: &Context<'_>, id: Uuid) -> AppResult<Event> {
+pub async fn event_by_id(ctx: &Context<'_>, id: EntityId) -> AppResult<Event> {
     let row = sqlx::query_as::<_, EventRow>(&format!("{EVENT_SELECT} WHERE e.id = $1")).bind(id).fetch_optional(&st(ctx).pool).await?
         .ok_or_else(|| AppError::not_found("Событие не найдено"))?;
     if !event_visible(viewer(ctx), row.status, row.organization_id) { return Err(AppError::not_found("Событие не найдено")); }
@@ -662,7 +662,7 @@ pub async fn event_by_id(ctx: &Context<'_>, id: Uuid) -> AppResult<Event> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn create_event(ctx: &Context<'_>, title: &str, description: &str, location: &str, start: &str, end: &str, required: i32, hours: f64, org: Uuid) -> AppResult<Event> {
+pub async fn create_event(ctx: &Context<'_>, title: &str, description: &str, location: &str, start: &str, end: &str, required: i32, hours: f64, org: EntityId) -> AppResult<Event> {
     let v = need(ctx)?;
     if !v.can_act_for_org(org) { return Err(AppError::Forbidden); }
     need_verified(ctx, v)?;
@@ -676,7 +676,7 @@ pub async fn create_event(ctx: &Context<'_>, title: &str, description: &str, loc
     let hours = finite(hours, "Планируемые часы")?;
     if !(hours > 0.0 && hours <= 744.0) { return Err(AppError::validation("Планируемые часы — от 0,5 до 744")); }
     let mut tx = st(ctx).pool.begin().await?;
-    let id: Uuid = sqlx::query_scalar(
+    let id: EntityId = sqlx::query_scalar(
         "INSERT INTO events (organization_id, title, description, location, start_at, end_at, required_volunteers, planned_hours)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8::float8::numeric(6,1)) RETURNING id",
     ).bind(org).bind(&title).bind(&description).bind(&location).bind(start_at).bind(end_at).bind(required).bind(hours)
@@ -687,12 +687,12 @@ pub async fn create_event(ctx: &Context<'_>, title: &str, description: &str, loc
     Ok(ev)
 }
 
-async fn event_org(conn: &mut PgConnection, id: Uuid) -> AppResult<Uuid> {
+async fn event_org(conn: &mut PgConnection, id: EntityId) -> AppResult<EntityId> {
     sqlx::query_scalar("SELECT organization_id FROM events WHERE id = $1").bind(id).fetch_optional(conn).await?
         .ok_or_else(|| AppError::not_found("Событие не найдено"))
 }
 
-async fn transition_event(ctx: &Context<'_>, id: Uuid, from: EventStatus, to: EventStatus, require_admin: bool, action: &str) -> AppResult<Event> {
+async fn transition_event(ctx: &Context<'_>, id: EntityId, from: EventStatus, to: EventStatus, require_admin: bool, action: &str) -> AppResult<Event> {
     let v = need(ctx)?;
     let mut tx = st(ctx).pool.begin().await?;
     let org = event_org(&mut tx, id).await?;
@@ -708,7 +708,7 @@ async fn transition_event(ctx: &Context<'_>, id: Uuid, from: EventStatus, to: Ev
     Ok(ev)
 }
 
-pub async fn moderate_event(ctx: &Context<'_>, id: Uuid, status: EventStatus) -> AppResult<Event> {
+pub async fn moderate_event(ctx: &Context<'_>, id: EntityId, status: EventStatus) -> AppResult<Event> {
     match status {
         EventStatus::Accepted | EventStatus::Cancelled => transition_event(ctx, id, EventStatus::Draft, status, true, "event.moderate").await,
         _ => Err(AppError::validation("Модерация допускает только статусы ACCEPTED и CANCELLED")),
@@ -719,7 +719,7 @@ pub async fn moderate_event(ctx: &Context<'_>, id: Uuid, status: EventStatus) ->
 ///   принятое событие (ACCEPTED) отменяется только с согласия администратора: создаётся запрос, событие остаётся в силе.
 /// * Администратор отменяет сразу (DRAFT | ACCEPTED → CANCELLED).
 /// При отмене принятого события все открытые и принятые заявки отменяются каскадом (триггер БД).
-pub async fn cancel_event(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -> AppResult<Event> {
+pub async fn cancel_event(ctx: &Context<'_>, id: EntityId, reason: Option<String>) -> AppResult<Event> {
     let v = need(ctx)?;
     let reason = clean_opt(&reason, "Причина отмены", 500)?;
     let mut tx = st(ctx).pool.begin().await?;
@@ -750,7 +750,7 @@ fn notify_cancelled(ctx: &Context<'_>, ev: &Event, to: Vec<Recipient>) {
 }
 
 /// Перевод в CANCELLED с каскадом заявок; возвращает участников, которым после коммита уходит письмо.
-async fn do_cancel_event(ctx: &Context<'_>, tx: &mut PgConnection, v: &Viewer, id: Uuid, reason: Option<&str>, action: &str) -> AppResult<(Event, Vec<Recipient>)> {
+async fn do_cancel_event(ctx: &Context<'_>, tx: &mut PgConnection, v: &Viewer, id: EntityId, reason: Option<&str>, action: &str) -> AppResult<(Event, Vec<Recipient>)> {
     let affected: i64 = sqlx::query_scalar("SELECT count(*) FROM volonteer_event_requests WHERE event_id = $1 AND status IN ('OPEN','ACCEPTED')")
         .bind(id).fetch_one(&mut *tx).await?;
     let to_notify = if st(ctx).mailer.enabled() { recipients_open_requests(tx, id).await } else { vec![] };
@@ -762,7 +762,7 @@ async fn do_cancel_event(ctx: &Context<'_>, tx: &mut PgConnection, v: &Viewer, i
 }
 
 /// Администратор согласует запрос организатора на отмену принятого события.
-pub async fn approve_event_cancellation(ctx: &Context<'_>, id: Uuid) -> AppResult<Event> {
+pub async fn approve_event_cancellation(ctx: &Context<'_>, id: EntityId) -> AppResult<Event> {
     let v = need(ctx)?;
     if !v.is_admin() { return Err(AppError::Forbidden); }
     let mut tx = st(ctx).pool.begin().await?;
@@ -776,7 +776,7 @@ pub async fn approve_event_cancellation(ctx: &Context<'_>, id: Uuid) -> AppResul
 }
 
 /// Администратор отклоняет запрос на отмену: событие остаётся в силе, причина запроса стирается.
-pub async fn reject_event_cancellation(ctx: &Context<'_>, id: Uuid) -> AppResult<Event> {
+pub async fn reject_event_cancellation(ctx: &Context<'_>, id: EntityId) -> AppResult<Event> {
     let v = need(ctx)?;
     if !v.is_admin() { return Err(AppError::Forbidden); }
     let mut tx = st(ctx).pool.begin().await?;
@@ -789,21 +789,21 @@ pub async fn reject_event_cancellation(ctx: &Context<'_>, id: Uuid) -> AppResult
     Ok(ev)
 }
 
-pub async fn close_event(ctx: &Context<'_>, id: Uuid) -> AppResult<Event> {
+pub async fn close_event(ctx: &Context<'_>, id: EntityId) -> AppResult<Event> {
     transition_event(ctx, id, EventStatus::Accepted, EventStatus::Closed, false, "event.close").await
 }
 
 // ---------- Заявки -------------------------------------------------------------------------------------------
-async fn fetch_request(conn: &mut PgConnection, id: Uuid) -> AppResult<VolonteerEventRequest> {
+async fn fetch_request(conn: &mut PgConnection, id: EntityId) -> AppResult<VolonteerEventRequest> {
     sqlx::query_as::<_, RequestRow>(&format!("{REQUEST_SELECT} WHERE r.id = $1")).bind(id).fetch_optional(conn).await?
         .map(Into::into).ok_or_else(|| AppError::not_found("Заявка не найдена"))
 }
 
-pub async fn requests_list(ctx: &Context<'_>, vol: Option<Uuid>, event: Option<Uuid>, status: Option<RequestStatus>) -> AppResult<Vec<VolonteerEventRequest>> {
+pub async fn requests_list(ctx: &Context<'_>, vol: Option<EntityId>, event: Option<EntityId>, status: Option<RequestStatus>) -> AppResult<Vec<VolonteerEventRequest>> {
     let Some(v) = viewer(ctx) else { return Ok(vec![]) };
     let rows = sqlx::query_as::<_, RequestRow>(&format!(
         "{REQUEST_SELECT} WHERE ($1 OR e.organization_id = $2 OR r.volonteer_id = $3)
-            AND ($4::uuid IS NULL OR r.volonteer_id = $4) AND ($5::uuid IS NULL OR r.event_id = $5)
+            AND ($4::text IS NULL OR r.volonteer_id = $4) AND ($5::text IS NULL OR r.event_id = $5)
             AND ($6::request_status IS NULL OR r.status = $6) ORDER BY r.created_at DESC"))
         .bind(v.is_admin())
         .bind(if v.role == UserRole::Organizer { v.organization_id } else { None })
@@ -813,11 +813,11 @@ pub async fn requests_list(ctx: &Context<'_>, vol: Option<Uuid>, event: Option<U
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
-pub async fn request_by_id(ctx: &Context<'_>, id: Uuid) -> AppResult<Option<VolonteerEventRequest>> {
+pub async fn request_by_id(ctx: &Context<'_>, id: EntityId) -> AppResult<Option<VolonteerEventRequest>> {
     Ok(requests_list(ctx, None, None, None).await?.into_iter().find(|r| r.id.as_str() == id.to_string()))
 }
 
-pub async fn submit_request(ctx: &Context<'_>, vol: Uuid, event: Uuid, description: Option<String>) -> AppResult<VolonteerEventRequest> {
+pub async fn submit_request(ctx: &Context<'_>, vol: EntityId, event: EntityId, description: Option<String>) -> AppResult<VolonteerEventRequest> {
     let v = need(ctx)?;
     if !v.can_act_for_volonteer(vol) { return Err(AppError::Forbidden); }
     need_verified(ctx, v)?;
@@ -825,7 +825,7 @@ pub async fn submit_request(ctx: &Context<'_>, vol: Uuid, event: Uuid, descripti
     let mut tx = st(ctx).pool.begin().await?;
     let hours: Option<f64> = sqlx::query_scalar("SELECT planned_hours::float8 FROM events WHERE id = $1").bind(event).fetch_optional(&mut *tx).await?;
     let hours = hours.ok_or_else(|| AppError::not_found("Событие не найдено"))?;
-    let id: Uuid = sqlx::query_scalar(
+    let id: EntityId = sqlx::query_scalar(
         "INSERT INTO volonteer_event_requests (volonteer_id, event_id, description, requested_hours) VALUES ($1,$2,$3,$4::float8::numeric(6,1)) RETURNING id",
     ).bind(vol).bind(event).bind(&description).bind(hours).fetch_one(&mut *tx).await
         .map_err(|e| match AppError::from(e) {
@@ -839,12 +839,12 @@ pub async fn submit_request(ctx: &Context<'_>, vol: Uuid, event: Uuid, descripti
 }
 
 /// (организация события, волонтёр) заявки — для проверок прав.
-async fn request_owner(conn: &mut PgConnection, id: Uuid) -> AppResult<(Uuid, Uuid)> {
+async fn request_owner(conn: &mut PgConnection, id: EntityId) -> AppResult<(EntityId, EntityId)> {
     sqlx::query_as("SELECT e.organization_id, r.volonteer_id FROM volonteer_event_requests r JOIN events e ON e.id = r.event_id WHERE r.id = $1")
         .bind(id).fetch_optional(conn).await?.ok_or_else(|| AppError::not_found("Заявка не найдена"))
 }
 
-pub async fn moderate_request(ctx: &Context<'_>, id: Uuid, status: RequestStatus, reason: Option<String>) -> AppResult<VolonteerEventRequest> {
+pub async fn moderate_request(ctx: &Context<'_>, id: EntityId, status: RequestStatus, reason: Option<String>) -> AppResult<VolonteerEventRequest> {
     let v = need(ctx)?;
     if !matches!(status, RequestStatus::Accepted | RequestStatus::Cancelled) {
         return Err(AppError::validation("Модерация допускает только статусы ACCEPTED и CANCELLED"));
@@ -877,7 +877,7 @@ pub async fn moderate_request(ctx: &Context<'_>, id: Uuid, status: RequestStatus
     Ok(r)
 }
 
-pub async fn confirm_work(ctx: &Context<'_>, id: Uuid, hours: f64) -> AppResult<VolonteerEventRequest> {
+pub async fn confirm_work(ctx: &Context<'_>, id: EntityId, hours: f64) -> AppResult<VolonteerEventRequest> {
     let v = need(ctx)?;
     let hours = finite(hours, "Часы")?;
     if !(0.0..=744.0).contains(&hours) { return Err(AppError::validation("Подтверждённые часы — от 0 до 744")); }
@@ -894,7 +894,7 @@ pub async fn confirm_work(ctx: &Context<'_>, id: Uuid, hours: f64) -> AppResult<
     Ok(r)
 }
 
-pub async fn cancel_request(ctx: &Context<'_>, id: Uuid) -> AppResult<VolonteerEventRequest> {
+pub async fn cancel_request(ctx: &Context<'_>, id: EntityId) -> AppResult<VolonteerEventRequest> {
     let v = need(ctx)?;
     let mut tx = st(ctx).pool.begin().await?;
     let (org, vol) = request_owner(&mut tx, id).await?;
@@ -913,14 +913,14 @@ pub async fn cancel_request(ctx: &Context<'_>, id: Uuid) -> AppResult<VolonteerE
 // ---------- Отзывы ------------------------------------------------------------------------------------------------
 pub const MAX_REVIEW_LENGTH: usize = 1000;
 
-pub async fn reviews_list(ctx: &Context<'_>, event: Option<Uuid>, vol: Option<Uuid>) -> AppResult<Vec<EventReview>> {
+pub async fn reviews_list(ctx: &Context<'_>, event: Option<EntityId>, vol: Option<EntityId>) -> AppResult<Vec<EventReview>> {
     let rows = sqlx::query_as::<_, ReviewRow>(&format!(
-        "{REVIEW_SELECT} WHERE ($1::uuid IS NULL OR event_id = $1) AND ($2::uuid IS NULL OR volonteer_id = $2) ORDER BY created_at DESC"))
+        "{REVIEW_SELECT} WHERE ($1::text IS NULL OR event_id = $1) AND ($2::text IS NULL OR volonteer_id = $2) ORDER BY created_at DESC"))
         .bind(event).bind(vol).fetch_all(&st(ctx).pool).await?;
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
-pub async fn submit_review(ctx: &Context<'_>, event: Uuid, vol: Uuid, rating: i32, text: &str) -> AppResult<EventReview> {
+pub async fn submit_review(ctx: &Context<'_>, event: EntityId, vol: EntityId, rating: i32, text: &str) -> AppResult<EventReview> {
     let v = need(ctx)?;
     if !v.can_act_for_volonteer(vol) { return Err(AppError::Forbidden); }
     if !(1..=5).contains(&rating) { return Err(AppError::validation("Поставьте оценку от 1 до 5 звёзд.")); }
@@ -949,10 +949,10 @@ pub async fn submit_review(ctx: &Context<'_>, event: Uuid, vol: Uuid, rating: i3
     Ok(row.into())
 }
 
-pub async fn delete_review(ctx: &Context<'_>, id: Uuid) -> AppResult<bool> {
+pub async fn delete_review(ctx: &Context<'_>, id: EntityId) -> AppResult<bool> {
     let v = need(ctx)?;
     let mut tx = st(ctx).pool.begin().await?;
-    let vol: Uuid = sqlx::query_scalar("SELECT volonteer_id FROM event_reviews WHERE id = $1").bind(id).fetch_optional(&mut *tx).await?
+    let vol: EntityId = sqlx::query_scalar("SELECT volonteer_id FROM event_reviews WHERE id = $1").bind(id).fetch_optional(&mut *tx).await?
         .ok_or_else(|| AppError::not_found("Отзыв не найден"))?;
     if !v.can_act_for_volonteer(vol) { return Err(AppError::Forbidden); }
     sqlx::query("DELETE FROM event_reviews WHERE id = $1").bind(id).execute(&mut *tx).await?;
@@ -962,7 +962,7 @@ pub async fn delete_review(ctx: &Context<'_>, id: Uuid) -> AppResult<bool> {
 }
 
 // ---------- Выписка ------------------------------------------------------------------------------------------------------
-pub async fn statement(ctx: &Context<'_>, vol: Uuid, start: &str, end: &str) -> AppResult<StatementReport> {
+pub async fn statement(ctx: &Context<'_>, vol: EntityId, start: &str, end: &str) -> AppResult<StatementReport> {
     let v = need(ctx)?;
     if !v.can_act_for_volonteer(vol) { return Err(AppError::Forbidden); }
     let start_at = if start.trim().is_empty() { parse_when("2020-01-01", false)? } else { parse_when(start, false)? };
@@ -989,12 +989,12 @@ fn photos_visible(ctx: &Context<'_>) -> bool { viewer(ctx).is_some() || st(ctx).
 
 async fn assemble_markers(ctx: &Context<'_>, rows: Vec<MarkerRow>) -> AppResult<Vec<MapMarker>> {
     let pool = &st(ctx).pool;
-    let ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+    let ids: Vec<EntityId> = rows.iter().map(|r| r.id).collect();
     // Одобренные фото видят все, кому разрешён просмотр; фото на проверке — только автор и администратор.
-    let photos: Vec<(Uuid, Uuid)> = if photos_visible(ctx) {
+    let photos: Vec<(EntityId, EntityId)> = if photos_visible(ctx) {
         sqlx::query_as("SELECT marker_id, id FROM photos WHERE purpose = 'MARKER' AND status = 'APPROVED' AND marker_id = ANY($1) ORDER BY marker_id, position").bind(&ids).fetch_all(pool).await?
     } else { vec![] };
-    let pending: Vec<(Uuid, Uuid)> = match viewer(ctx) {
+    let pending: Vec<(EntityId, EntityId)> = match viewer(ctx) {
         Some(v) => sqlx::query_as(
             "SELECT marker_id, id FROM photos WHERE purpose = 'MARKER' AND status = 'PENDING' AND marker_id = ANY($1) AND ($2 OR uploaded_by = $3) ORDER BY marker_id, position",
         ).bind(&ids).bind(v.is_admin()).bind(v.user_id).fetch_all(pool).await?,
@@ -1032,7 +1032,7 @@ pub async fn markers_list(ctx: &Context<'_>, kind: Option<MapMarkerType>) -> App
     assemble_markers(ctx, rows).await
 }
 
-async fn marker_one(ctx: &Context<'_>, id: Uuid) -> AppResult<MapMarker> {
+async fn marker_one(ctx: &Context<'_>, id: EntityId) -> AppResult<MapMarker> {
     let row = sqlx::query_as::<_, MarkerRow>(&format!("{MARKER_SELECT} WHERE id = $1")).bind(id).fetch_optional(&st(ctx).pool).await?
         .ok_or_else(|| AppError::not_found("Метка не найдена"))?;
     Ok(assemble_markers(ctx, vec![row]).await?.remove(0))
@@ -1059,7 +1059,7 @@ pub async fn create_marker(ctx: &Context<'_>, input: MapMarkerInput) -> AppResul
     let photos = media::process_many(photo_inputs).await?;
 
     let mut tx = st(ctx).pool.begin().await?;
-    let id: Uuid = sqlx::query_scalar(
+    let id: EntityId = sqlx::query_scalar(
         "INSERT INTO map_markers (type, title, description, lat, lng, urgency, contact_phone, last_seen_date, last_seen_location, created_by, created_by_name)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
     ).bind(input.kind).bind(&title).bind(&description).bind(lat).bind(lng).bind(input.urgency).bind(crypto::seal_opt(phone.as_deref())).bind(seen_date).bind(&seen_loc)
@@ -1081,7 +1081,7 @@ pub async fn create_marker(ctx: &Context<'_>, input: MapMarkerInput) -> AppResul
     marker_one(ctx, id).await
 }
 
-pub async fn request_marker_close(ctx: &Context<'_>, id: Uuid, photo: Option<String>, note: &str, target: MapMarkerStatus) -> AppResult<MapMarker> {
+pub async fn request_marker_close(ctx: &Context<'_>, id: EntityId, photo: Option<String>, note: &str, target: MapMarkerStatus) -> AppResult<MapMarker> {
     let v = need(ctx)?;
     if !matches!(target, MapMarkerStatus::Found | MapMarkerStatus::Closed) {
         return Err(AppError::validation("Итоговый статус — FOUND или CLOSED"));
@@ -1099,7 +1099,7 @@ pub async fn request_marker_close(ctx: &Context<'_>, id: Uuid, photo: Option<Str
     let n = sqlx::query("UPDATE map_markers SET status = 'PENDING_APPROVAL' WHERE id = $1 AND status = 'ACTIVE'").bind(id).execute(&mut *tx).await?.rows_affected();
     if n == 0 { return Err(AppError::conflict("Метка уже закрыта или ожидает согласования")); }
     let photo_id = match &photo {
-        Some(p) => Some(sqlx::query_scalar::<_, Uuid>(
+        Some(p) => Some(sqlx::query_scalar::<_, EntityId>(
             "INSERT INTO photos (marker_id, purpose, position, content_type, data, size_bytes, sha256, uploaded_by) VALUES ($1,'CLOSURE',0,$2,$3,$4,$5,$6) RETURNING id",
         ).bind(id).bind(p.content_type).bind(&p.bytes).bind(p.bytes.len() as i32).bind(&p.sha256).bind(v.user_id).fetch_one(&mut *tx).await?),
         None => None,
@@ -1115,7 +1115,7 @@ pub async fn request_marker_close(ctx: &Context<'_>, id: Uuid, photo: Option<Str
 pub async fn photo_moderation_queue(ctx: &Context<'_>) -> AppResult<Vec<PhotoModerationItem>> {
     let v = need(ctx)?;
     if !v.is_admin() { return Err(AppError::Forbidden); }
-    let rows: Vec<(Uuid, Uuid, String, Option<String>, chrono::DateTime<Utc>)> = sqlx::query_as(
+    let rows: Vec<(EntityId, EntityId, String, Option<String>, chrono::DateTime<Utc>)> = sqlx::query_as(
         "SELECT p.id, p.marker_id, m.title, pe.last_name || ' ' || pe.first_name, p.created_at
            FROM photos p JOIN map_markers m ON m.id = p.marker_id LEFT JOIN users u ON u.id = p.uploaded_by LEFT JOIN persons pe ON pe.id = u.person_id
           WHERE p.status = 'PENDING' AND p.purpose = 'MARKER' ORDER BY p.created_at",
@@ -1125,11 +1125,11 @@ pub async fn photo_moderation_queue(ctx: &Context<'_>) -> AppResult<Vec<PhotoMod
     }).collect())
 }
 
-pub async fn approve_photo(ctx: &Context<'_>, id: Uuid) -> AppResult<MapMarker> {
+pub async fn approve_photo(ctx: &Context<'_>, id: EntityId) -> AppResult<MapMarker> {
     let v = need(ctx)?;
     if !v.is_admin() { return Err(AppError::Forbidden); }
     let mut tx = st(ctx).pool.begin().await?;
-    let marker: Option<Uuid> = sqlx::query_scalar(
+    let marker: Option<EntityId> = sqlx::query_scalar(
         "UPDATE photos SET status = 'APPROVED', moderated_by = $2, moderated_at = now() WHERE id = $1 AND status = 'PENDING' AND purpose = 'MARKER' RETURNING marker_id",
     ).bind(id).bind(v.user_id).fetch_optional(&mut *tx).await?;
     let marker = marker.ok_or_else(|| AppError::conflict("Фото не ожидает проверки"))?;
@@ -1139,12 +1139,12 @@ pub async fn approve_photo(ctx: &Context<'_>, id: Uuid) -> AppResult<MapMarker> 
 }
 
 /// Отклонённое фото удаляется целиком; причина остаётся только в журнале аудита.
-pub async fn reject_photo(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -> AppResult<MapMarker> {
+pub async fn reject_photo(ctx: &Context<'_>, id: EntityId, reason: Option<String>) -> AppResult<MapMarker> {
     let v = need(ctx)?;
     if !v.is_admin() { return Err(AppError::Forbidden); }
     let reason = clean_opt(&reason, "Причина", 500)?.unwrap_or_else(|| "Не соответствует правилам".into());
     let mut tx = st(ctx).pool.begin().await?;
-    let row: Option<(Uuid, Option<Uuid>)> = sqlx::query_as("DELETE FROM photos WHERE id = $1 AND status = 'PENDING' AND purpose = 'MARKER' RETURNING marker_id, uploaded_by")
+    let row: Option<(EntityId, Option<EntityId>)> = sqlx::query_as("DELETE FROM photos WHERE id = $1 AND status = 'PENDING' AND purpose = 'MARKER' RETURNING marker_id, uploaded_by")
         .bind(id).fetch_optional(&mut *tx).await?;
     let (marker, author) = row.ok_or_else(|| AppError::conflict("Фото не ожидает проверки"))?;
     audit(&mut tx, Some(v), "photo.reject", "photo", Some(id), json!({"marker": marker, "reason": reason})).await?;
@@ -1159,7 +1159,7 @@ pub async fn reject_photo(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -
     marker_one(ctx, marker).await
 }
 
-pub async fn approve_marker_close(ctx: &Context<'_>, id: Uuid) -> AppResult<MapMarker> {
+pub async fn approve_marker_close(ctx: &Context<'_>, id: EntityId) -> AppResult<MapMarker> {
     let v = need(ctx)?;
     if !v.is_admin() { return Err(AppError::Forbidden); }
     let mut tx = st(ctx).pool.begin().await?;
@@ -1181,7 +1181,7 @@ pub async fn approve_marker_close(ctx: &Context<'_>, id: Uuid) -> AppResult<MapM
 
 /// Удаляет закрытую метку ПСО вместе с фотографиями и отчётом о закрытии (каскадом БД).
 /// Возвращает «снимок» метки без фото — чтобы ответить на мутацию.
-async fn remove_search_marker(conn: &mut PgConnection, id: Uuid, final_status: MapMarkerStatus) -> AppResult<MapMarker> {
+async fn remove_search_marker(conn: &mut PgConnection, id: EntityId, final_status: MapMarkerStatus) -> AppResult<MapMarker> {
     let r = sqlx::query_as::<_, MarkerRow>(&format!("{MARKER_SELECT} WHERE id = $1")).bind(id).fetch_optional(&mut *conn).await?
         .ok_or_else(|| AppError::not_found("Метка не найдена"))?;
     sqlx::query("DELETE FROM map_markers WHERE id = $1").bind(id).execute(&mut *conn).await?;
@@ -1192,7 +1192,7 @@ async fn remove_search_marker(conn: &mut PgConnection, id: Uuid, final_status: M
     })
 }
 
-pub async fn reject_marker_close(ctx: &Context<'_>, id: Uuid, reason: Option<String>) -> AppResult<MapMarker> {
+pub async fn reject_marker_close(ctx: &Context<'_>, id: EntityId, reason: Option<String>) -> AppResult<MapMarker> {
     let v = need(ctx)?;
     if !v.is_admin() { return Err(AppError::Forbidden); }
     let reason = clean_opt(&reason, "Причина", 500)?.unwrap_or_else(|| "Недостаточно подтверждающих материалов".into());
@@ -1208,10 +1208,10 @@ pub async fn reject_marker_close(ctx: &Context<'_>, id: Uuid, reason: Option<Str
 }
 
 /// Закрытие обычной метки: автор или администратор. Метки ПСО закрываются только через отчёт.
-pub async fn close_marker(ctx: &Context<'_>, id: Uuid) -> AppResult<MapMarker> {
+pub async fn close_marker(ctx: &Context<'_>, id: EntityId) -> AppResult<MapMarker> {
     let v = need(ctx)?;
     let mut tx = st(ctx).pool.begin().await?;
-    let (kind, owner): (MapMarkerType, Option<Uuid>) = sqlx::query_as("SELECT type, created_by FROM map_markers WHERE id = $1").bind(id).fetch_optional(&mut *tx).await?
+    let (kind, owner): (MapMarkerType, Option<EntityId>) = sqlx::query_as("SELECT type, created_by FROM map_markers WHERE id = $1").bind(id).fetch_optional(&mut *tx).await?
         .ok_or_else(|| AppError::not_found("Метка не найдена"))?;
     if kind == MapMarkerType::SearchRescue && !v.is_admin() {
         return Err(AppError::Forbidden);
@@ -1229,7 +1229,7 @@ pub async fn close_marker(ctx: &Context<'_>, id: Uuid) -> AppResult<MapMarker> {
     marker_one(ctx, id).await
 }
 
-pub async fn delete_marker(ctx: &Context<'_>, id: Uuid) -> AppResult<bool> {
+pub async fn delete_marker(ctx: &Context<'_>, id: EntityId) -> AppResult<bool> {
     let v = need(ctx)?;
     if !v.is_admin() { return Err(AppError::Forbidden); }
     let mut tx = st(ctx).pool.begin().await?;
@@ -1330,7 +1330,7 @@ pub async fn delete_my_account(ctx: &Context<'_>, password: &str) -> AppResult<b
     let (first, last) = DELETED_NAME;
     let tombstone = format!("{last} {first}");
     let mut tx = pool.begin().await?;
-    let person_id: Uuid = sqlx::query_scalar("SELECT person_id FROM users WHERE id = $1").bind(v.user_id).fetch_one(&mut *tx).await?;
+    let person_id: EntityId = sqlx::query_scalar("SELECT person_id FROM users WHERE id = $1").bind(v.user_id).fetch_one(&mut *tx).await?;
 
     if let Some(org) = v.organization_id {
         let active: i64 = sqlx::query_scalar("SELECT count(*) FROM events WHERE organization_id = $1 AND status = 'ACCEPTED'").bind(org).fetch_one(&mut *tx).await?;

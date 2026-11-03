@@ -12,7 +12,7 @@ use axum::{
 };
 use sqlx::PgPool;
 use tower_http::{limit::RequestBodyLimitLayer, services::{ServeDir, ServeFile}, set_header::SetResponseHeaderLayer, trace::TraceLayer};
-use uuid::Uuid;
+use crate::id::EntityId;
 
 use crate::{
     auth::{self, RateLimiter, Viewer, COOKIE_NAME},
@@ -118,8 +118,8 @@ async fn graphql_handler(State(web): State<Web>, ConnectInfo(peer): ConnectInfo<
 }
 
 /// Фото отдаются только через сервер и только с проверкой прав.
-async fn media_photo(State(web): State<Web>, headers: HeaderMap, Path(id): Path<Uuid>) -> Response {
-    let row: Option<(String, String, Vec<u8>, String, String, Option<Uuid>)> = match sqlx::query_as(
+async fn media_photo(State(web): State<Web>, headers: HeaderMap, Path(id): Path<EntityId>) -> Response {
+    let row: Option<(String, String, Vec<u8>, String, String, Option<EntityId>)> = match sqlx::query_as(
         "SELECT purpose::text, content_type, data, sha256, status::text, uploaded_by FROM photos WHERE id = $1",
     ).bind(id).fetch_optional(&web.state.pool).await {
         Ok(r) => r,

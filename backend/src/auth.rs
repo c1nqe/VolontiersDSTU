@@ -15,7 +15,7 @@ use argon2::{
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use uuid::Uuid;
+use crate::id::EntityId;
 
 use crate::{error::{AppError, AppResult}, model::UserRole};
 
@@ -67,13 +67,13 @@ pub fn validate_password(password: &str, email: &str) -> AppResult<()> {
 // ---------- JWT --------------------------------------------------------------
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: Uuid,
+    pub sub: EntityId,
     pub tv: i32,
     pub iat: i64,
     pub exp: i64,
 }
 
-pub fn issue_token(secret: &[u8], user_id: Uuid, token_version: i32, hours: i64) -> anyhow::Result<(String, i64)> {
+pub fn issue_token(secret: &[u8], user_id: EntityId, token_version: i32, hours: i64) -> anyhow::Result<(String, i64)> {
     let now = chrono::Utc::now().timestamp();
     let claims = Claims { sub: user_id, tv: token_version, iat: now, exp: now + hours * 3600 };
     let token = encode(&Header::new(Algorithm::HS256), &claims, &EncodingKey::from_secret(secret))?;
@@ -101,10 +101,10 @@ pub fn clear_cookie(secure: bool) -> String {
 /// Аутентифицированный пользователь, от имени которого выполняется запрос.
 #[derive(Debug, Clone)]
 pub struct Viewer {
-    pub user_id: Uuid,
+    pub user_id: EntityId,
     pub role: UserRole,
-    pub organization_id: Option<Uuid>,
-    pub volonteer_id: Option<Uuid>,
+    pub organization_id: Option<EntityId>,
+    pub volonteer_id: Option<EntityId>,
     pub full_name: String,
     pub email_verified: bool,
     /// Момент истечения сессии (unix-время из JWT).
@@ -115,11 +115,11 @@ impl Viewer {
     pub fn is_admin(&self) -> bool { self.role == UserRole::Admin }
 
     /// Может ли действовать от имени организации (свой организатор или администратор).
-    pub fn can_act_for_org(&self, org: Uuid) -> bool {
+    pub fn can_act_for_org(&self, org: EntityId) -> bool {
         self.is_admin() || (self.role == UserRole::Organizer && self.organization_id == Some(org))
     }
     /// Может ли действовать от имени волонтёра (сам волонтёр или администратор).
-    pub fn can_act_for_volonteer(&self, vol: Uuid) -> bool {
+    pub fn can_act_for_volonteer(&self, vol: EntityId) -> bool {
         self.is_admin() || (self.role == UserRole::Volunteer && self.volonteer_id == Some(vol))
     }
 }
@@ -127,7 +127,7 @@ impl Viewer {
 /// Загружает пользователя по токену и сверяет token_version (отзыв сессий).
 pub async fn viewer_from_token(pool: &PgPool, secret: &[u8], token: &str) -> Option<Viewer> {
     let claims = decode_token(secret, token)?;
-    let row: Option<(Uuid, UserRole, Option<Uuid>, Option<Uuid>, String, String, i32, bool)> = sqlx::query_as(
+    let row: Option<(EntityId, UserRole, Option<EntityId>, Option<EntityId>, String, String, i32, bool)> = sqlx::query_as(
         "SELECT u.id, u.role, u.organization_id, u.volonteer_id, p.last_name, p.first_name, u.token_version, u.email_verified_at IS NOT NULL
            FROM users u JOIN persons p ON p.id = u.person_id WHERE u.id = $1 AND u.deleted_at IS NULL",
     )

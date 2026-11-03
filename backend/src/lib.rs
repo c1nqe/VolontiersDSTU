@@ -5,6 +5,7 @@ pub mod config;
 pub mod crypto;
 pub mod error;
 pub mod graphql;
+pub mod id;
 pub mod mail;
 pub mod media;
 pub mod model;

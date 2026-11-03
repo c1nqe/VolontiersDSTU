@@ -208,6 +208,8 @@ stateDiagram-v2
 
 Контракт API — `schema.graphql` (генерируется из кода), операции фронтенда — `operations.graphql`. Устройство, запуск, права по ролям и развёртывание — в [docs/BACKEND.md](docs/BACKEND.md).
 
+Переход на хеш-ID в таблицах и внутренние счётчики `SERIAL`, включая порядок применения миграции 0008 к существующим данным, описан в [docs/HASHED_IDS.md](docs/HASHED_IDS.md).
+
 ## Безопасность данных
 
 Кратко (полностью — в [docs/BACKEND.md](docs/BACKEND.md#безопасность-данных)):

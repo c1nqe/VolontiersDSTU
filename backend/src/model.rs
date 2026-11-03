@@ -5,7 +5,7 @@
 use async_graphql::{ComplexObject, Context, Enum, SimpleObject, ID};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use sqlx::FromRow;
-use uuid::Uuid;
+use crate::id::EntityId;
 
 use crate::error::{AppError, AppResult};
 
@@ -30,11 +30,11 @@ pub fn msk(t: DateTime<Utc>) -> chrono::DateTime<Utc> { t + Duration::hours(3) }
 pub fn msk_date(t: DateTime<Utc>) -> String { msk(t).format("%Y-%m-%d").to_string() }
 pub fn rfc3339(t: DateTime<Utc>) -> String { t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true) }
 pub fn opt_date(d: Option<NaiveDate>) -> Option<String> { d.map(|d| d.format("%Y-%m-%d").to_string()) }
-pub fn photo_url(id: Uuid) -> String { format!("/media/photos/{id}") }
-pub fn gid(id: Uuid) -> ID { ID(id.to_string()) }
+pub fn photo_url(id: EntityId) -> String { format!("/media/photos/{id}") }
+pub fn gid(id: EntityId) -> ID { ID(id.to_string()) }
 
-pub fn parse_id(id: &ID) -> AppResult<Uuid> {
-    Uuid::parse_str(id.as_str()).map_err(|_| AppError::validation("Некорректный идентификатор"))
+pub fn parse_id(id: &ID) -> AppResult<EntityId> {
+    id.as_str().parse::<EntityId>().map_err(|_| AppError::validation("Некорректный идентификатор"))
 }
 
 /// Календарная дата или момент времени → UTC. Для «чистой» даты: начало — 00:00 МСК, конец — 23:59:59 МСК.
@@ -71,14 +71,14 @@ pub struct User {
 
 #[derive(FromRow, Debug)]
 pub struct UserRow {
-    pub id: Uuid,
+    pub id: EntityId,
     pub first_name: String,
     pub last_name: String,
     pub email: String,
     pub role: UserRole,
     pub created_at: DateTime<Utc>,
-    pub organization_id: Option<Uuid>,
-    pub volonteer_id: Option<Uuid>,
+    pub organization_id: Option<EntityId>,
+    pub volonteer_id: Option<EntityId>,
     pub consent_at: Option<DateTime<Utc>>,
     pub consent_version: Option<String>,
     pub email_verified_at: Option<DateTime<Utc>>,
@@ -107,7 +107,7 @@ pub struct AuthPayload {
 // ---------- Организация --------------------------------------------------------
 #[derive(FromRow, Debug)]
 pub struct OrganizationRow {
-    pub id: Uuid,
+    pub id: EntityId,
     pub name: String,
     pub inn: Option<String>,
     pub contact_person: String,
@@ -152,7 +152,7 @@ impl Organization {
 // ---------- Волонтёр -----------------------------------------------------------
 #[derive(FromRow, Debug)]
 pub struct VolonteerRow {
-    pub id: Uuid,
+    pub id: EntityId,
     pub first_name: String,
     pub last_name: String,
     pub full_name: String,
@@ -215,8 +215,8 @@ impl Volonteer {
 // ---------- Событие -------------------------------------------------------------
 #[derive(FromRow, Debug)]
 pub struct EventRow {
-    pub id: Uuid,
-    pub organization_id: Uuid,
+    pub id: EntityId,
+    pub organization_id: EntityId,
     pub organization_name: String,
     pub title: String,
     pub description: String,
@@ -299,16 +299,16 @@ impl Event {
 // ---------- Заявка (VolonteerEventRequest) ----------------------------------------
 #[derive(FromRow, Debug)]
 pub struct RequestRow {
-    pub id: Uuid,
-    pub volonteer_id: Uuid,
+    pub id: EntityId,
+    pub volonteer_id: EntityId,
     pub volonteer_name: String,
     pub volonteer_faculty: Option<String>,
     pub volonteer_student_id: Option<String>,
-    pub event_id: Uuid,
+    pub event_id: EntityId,
     pub event_title: String,
     pub event_start: DateTime<Utc>,
     pub event_status: EventStatus,
-    pub organization_id: Uuid,
+    pub organization_id: EntityId,
     pub organization_name: String,
     pub description: Option<String>,
     pub status: RequestStatus,
@@ -374,9 +374,9 @@ impl VolonteerEventRequest {
 // ---------- Отзыв -----------------------------------------------------------------
 #[derive(FromRow, Debug)]
 pub struct ReviewRow {
-    pub id: Uuid,
-    pub event_id: Uuid,
-    pub volonteer_id: Uuid,
+    pub id: EntityId,
+    pub event_id: EntityId,
+    pub volonteer_id: EntityId,
     pub author_name: String,
     pub rating: i16,
     pub text: String,
@@ -468,7 +468,7 @@ pub struct PhotoModerationItem {
 
 #[derive(FromRow, Debug)]
 pub struct MarkerRow {
-    pub id: Uuid,
+    pub id: EntityId,
     pub kind: MapMarkerType,
     pub status: MapMarkerStatus,
     pub title: String,
@@ -479,7 +479,7 @@ pub struct MarkerRow {
     pub contact_phone: Option<String>,
     pub last_seen_date: Option<NaiveDate>,
     pub last_seen_location: Option<String>,
-    pub created_by: Option<Uuid>,
+    pub created_by: Option<EntityId>,
     pub created_by_name: String,
     pub created_at: DateTime<Utc>,
 }
@@ -488,11 +488,11 @@ pub const MARKER_SELECT: &str = "SELECT id, type AS kind, status, title, descrip
 
 #[derive(FromRow, Debug)]
 pub struct ClosureRow {
-    pub marker_id: Uuid,
-    pub photo_id: Option<Uuid>,
+    pub marker_id: EntityId,
+    pub photo_id: Option<EntityId>,
     pub note: String,
     pub target_status: MapMarkerStatus,
-    pub submitted_by: Option<Uuid>,
+    pub submitted_by: Option<EntityId>,
     pub submitted_by_name: String,
     pub submitted_at: DateTime<Utc>,
     pub approved_at: Option<DateTime<Utc>>,

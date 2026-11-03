@@ -178,13 +178,13 @@ async fn register_rules() {
     let d = env.ok(None, q, json!({"e":"org2@x.ru","p":"Str0ng-pass","r":"ORGANIZER","ph":"+79000000012","inn":" 6173681934 "})).await;
     assert!(d["register"]["user"]["organizationId"].is_string());
     let oid = d["register"]["user"]["organizationId"].as_str().unwrap().to_string();
-    let inn: Option<String> = sqlx::query_scalar("SELECT inn FROM organizations WHERE id = $1::uuid").bind(&oid).fetch_one(&env.pool).await.unwrap();
+    let inn: Option<String> = sqlx::query_scalar("SELECT inn FROM organizations WHERE id = $1::text").bind(&oid).fetch_one(&env.pool).await.unwrap();
     assert_eq!(inn.as_deref(), Some("6173681934"), "ИНН сохраняется в организации без пробелов");
     // организатор регистрируется сам и задаёт название организации; дубликат названия отклоняется
     let qo = "mutation($e:String!,$n:String,$ph:String!){register(firstName:\"Пётр\",lastName:\"Орг\",email:$e,phone:$ph,password:\"Str0ng-pass\",role:ORGANIZER,consent:true,organizationName:$n,inn:\"6164262126\"){user{organizationId}}}";
     let d = env.ok(None, qo, json!({"e": "own@x.ru", "n": "Клуб «Добрые руки»", "ph": "+79000000013"})).await;
     let oid = d["register"]["user"]["organizationId"].as_str().unwrap().to_string();
-    let name: String = sqlx::query_scalar("SELECT name FROM organizations WHERE id = $1::uuid").bind(&oid).fetch_one(&env.pool).await.unwrap();
+    let name: String = sqlx::query_scalar("SELECT name FROM organizations WHERE id = $1::text").bind(&oid).fetch_one(&env.pool).await.unwrap();
     assert_eq!(name, "Клуб «Добрые руки»");
     let (m, code) = env.err(None, qo, json!({"e": "own2@x.ru", "n": "клуб «добрые руки»", "ph": "+79000000014"})).await;
     assert_eq!(code, "CONFLICT", "{m}");
@@ -449,8 +449,10 @@ async fn photos_pipeline_and_access() {
     assert!(body.starts_with(&[0xFF, 0xD8, 0xFF]));
     let img = image::load_from_memory(&body).unwrap();
     assert!(img.width() <= 1600 && img.height() <= 1600, "размер ограничен");
-    let (st, _, _) = get("/media/photos/00000000-0000-0000-0000-000000000000".into(), None).await;
+    let (st, _, _) = get(format!("/media/photos/{}", "0".repeat(64)), None).await;
     assert_eq!(st, StatusCode::NOT_FOUND);
+    let (st, _, _) = get("/media/photos/00000000-0000-0000-0000-000000000000".into(), None).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "старый UUID не является хеш-ID");
 
     // отчёт о закрытии: нужно фото; фото отчёта — только для авторизованных
     let close = "mutation($m:ID!,$p:String){requestMarkerClose(markerId:$m,photo:$p,note:\"Найден живым\",targetStatus:FOUND){status closureProof{photo targetStatus}}}";
@@ -478,7 +480,7 @@ async fn photos_pipeline_and_access() {
     assert_eq!(code, "CONFLICT", "метки больше нет — согласовывать нечего");
     let gone = env.ok(Some(&admin), "{ mapMarkers { id } }", json!({})).await;
     assert!(gone["mapMarkers"].as_array().unwrap().iter().all(|m| m["id"] != marker.as_str()), "закрытая ПСО не отображается");
-    let left: i64 = sqlx::query_scalar("SELECT (SELECT count(*) FROM map_markers WHERE id = $1::uuid) + (SELECT count(*) FROM photos WHERE marker_id = $1::uuid) + (SELECT count(*) FROM marker_closures WHERE marker_id = $1::uuid)")
+    let left: i64 = sqlx::query_scalar("SELECT (SELECT count(*) FROM map_markers WHERE id = $1::text) + (SELECT count(*) FROM photos WHERE marker_id = $1::text) + (SELECT count(*) FROM marker_closures WHERE marker_id = $1::text)")
         .bind(&marker).fetch_one(&env.pool).await.unwrap();
     assert_eq!(left, 0, "метка, фото и отчёт удалены");
     let (st, _, _) = get(photos[0].clone(), None).await;
@@ -507,7 +509,7 @@ async fn http_hardening() {
     // OpenStreetMap блокирует запросы плиток без Referer, поэтому при переходе на другой сайт отправляется хотя бы origin
     assert_eq!(res.headers()["referrer-policy"], "strict-origin-when-cross-origin");
     assert!(res.headers()["content-security-policy"].to_str().unwrap().contains("default-src 'self'"));
-    // мусорный UUID → понятная ошибка ввода, а не 500
+    // мусорный ID → понятная ошибка ввода, а не 500
     let (_, code) = env.err(None, "{ event(id:\"not-a-uuid\") { id } }", json!({})).await;
     assert_eq!(code, "BAD_USER_INPUT");
     env.cleanup().await;
@@ -577,7 +579,7 @@ async fn cancellation_of_accepted_events_and_requests() {
     assert_eq!(d["approveEventCancellation"]["cancelReason"], "Плохая погода");
     assert!(d["approveEventCancellation"]["cancelRequestedAt"].is_null());
     for r in [&ra, &rb] {
-        let (st, reason): (String, Option<String>) = sqlx::query_as("SELECT status::text, rejection_reason FROM volonteer_event_requests WHERE id = $1::uuid").bind(r).fetch_one(&env.pool).await.unwrap();
+        let (st, reason): (String, Option<String>) = sqlx::query_as("SELECT status::text, rejection_reason FROM volonteer_event_requests WHERE id = $1::text").bind(r).fetch_one(&env.pool).await.unwrap();
         assert_eq!(st, "CANCELLED", "заявки отменённого события отменяются");
         assert_eq!(reason.as_deref(), Some("Плохая погода"));
     }
@@ -608,7 +610,7 @@ async fn cancellation_of_accepted_events_and_requests() {
     assert_eq!(code, "CONFLICT");
 
     // --- прямой SQL: принятую заявку закрытого события отменить нельзя
-    sqlx::query("UPDATE volonteer_event_requests SET status = 'ACCEPTED', confirmed_hours = NULL WHERE id = $1::uuid").bind(&r4).execute(&env.pool).await.unwrap_err();
+    sqlx::query("UPDATE volonteer_event_requests SET status = 'ACCEPTED', confirmed_hours = NULL WHERE id = $1::text").bind(&r4).execute(&env.pool).await.unwrap_err();
     env.cleanup().await;
 }
 
@@ -999,7 +1001,7 @@ async fn organizer_cancellation_needs_admin_approval() {
     assert!(d["cancelEvent"]["cancelRequestedAt"].is_string());
     let (_, code) = env.err(Some(&o), cancel, json!({"e": ev, "r": "Ещё раз"})).await;
     assert_eq!(code, "CONFLICT", "повторный запрос не создаётся");
-    let st: String = sqlx::query_scalar("SELECT status::text FROM volonteer_event_requests WHERE id = $1::uuid").bind(&r).fetch_one(&env.pool).await.unwrap();
+    let st: String = sqlx::query_scalar("SELECT status::text FROM volonteer_event_requests WHERE id = $1::text").bind(&r).fetch_one(&env.pool).await.unwrap();
     assert_eq!(st, "ACCEPTED", "пока администратор не решил, заявки не отменяются");
 
     // решать может только администратор
@@ -1019,10 +1021,10 @@ async fn organizer_cancellation_needs_admin_approval() {
     let d = env.ok(Some(&a), "mutation($e:ID!){approveEventCancellation(eventId:$e){status cancelReason}}", json!({"e": ev})).await;
     assert_eq!(d["approveEventCancellation"]["status"], "CANCELLED");
     assert_eq!(d["approveEventCancellation"]["cancelReason"], "Площадка закрыта");
-    let (st, reason): (String, Option<String>) = sqlx::query_as("SELECT status::text, rejection_reason FROM volonteer_event_requests WHERE id = $1::uuid").bind(&r).fetch_one(&env.pool).await.unwrap();
+    let (st, reason): (String, Option<String>) = sqlx::query_as("SELECT status::text, rejection_reason FROM volonteer_event_requests WHERE id = $1::text").bind(&r).fetch_one(&env.pool).await.unwrap();
     assert_eq!(st, "CANCELLED");
     assert_eq!(reason.as_deref(), Some("Площадка закрыта"));
-    let actions: Vec<String> = sqlx::query_scalar("SELECT action FROM audit_log WHERE entity_id = $1::uuid ORDER BY id").bind(&ev).fetch_all(&env.pool).await.unwrap();
+    let actions: Vec<String> = sqlx::query_scalar("SELECT action FROM audit_log WHERE entity_id = $1::text ORDER BY serial_id").bind(&ev).fetch_all(&env.pool).await.unwrap();
     for a in ["event.cancel_requested", "event.cancel_rejected", "event.cancel_approved"] {
         assert!(actions.iter().any(|x| x == a), "{a} нет в журнале: {actions:?}");
     }
@@ -1072,10 +1074,10 @@ async fn personal_data_is_encrypted_at_rest() {
     assert!(export.contains("anna@x.ru") && export.contains("111-22-33") && !export.contains("enc:v1:"), "{export}");
 
     // данные, записанные в обход сервера открытым текстом (как до шифрования), шифруются при старте
-    sqlx::query("UPDATE volonteers SET email = 'legacy@x.ru', email_hash = NULL, phone = '+7 900 000-00-00' WHERE id = $1::uuid").bind(&vid).execute(&env.pool).await.unwrap();
+    sqlx::query("UPDATE volonteers SET email = 'legacy@x.ru', email_hash = NULL, phone = '+7 900 000-00-00' WHERE id = $1::text").bind(&vid).execute(&env.pool).await.unwrap();
     let n = volontiers_server::pii::encrypt_existing(&env.pool).await.unwrap();
     assert!(n >= 2);
-    let (email, hash): (String, Option<String>) = sqlx::query_as("SELECT email, email_hash FROM volonteers WHERE id = $1::uuid").bind(&vid).fetch_one(&env.pool).await.unwrap();
+    let (email, hash): (String, Option<String>) = sqlx::query_as("SELECT email, email_hash FROM volonteers WHERE id = $1::text").bind(&vid).fetch_one(&env.pool).await.unwrap();
     assert!(email.starts_with("enc:v1:") && crypto::open(&email) == "legacy@x.ru");
     assert_eq!(hash, Some(crypto::email_index("legacy@x.ru")));
     assert_eq!(volontiers_server::pii::encrypt_existing(&env.pool).await.unwrap(), 0, "повторный запуск ничего не меняет");
